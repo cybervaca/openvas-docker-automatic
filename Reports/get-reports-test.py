@@ -153,6 +153,8 @@ def noexiste(fichero):
 
 # Función para guardar datos en un fichero
 def guardar(fichero, data):
+    # Crear directorio si no existe
+    os.makedirs(os.path.dirname(fichero), exist_ok=True)
     with open(fichero, "w") as f:
         f.write(data)
 
@@ -393,6 +395,8 @@ def get_tasks_and_exclusions(connection, user, password, pais):
 
         # Escribir nuevos registros si los hay
         if new_records:
+            # Crear directorio si no existe
+            os.makedirs(os.path.dirname(CSV_FILE), exist_ok=True)
             file_exists = os.path.exists(CSV_FILE)
             with open(CSV_FILE, 'a', newline='') as csvfile:
                 fieldnames = ['task_name', 'excluded_ips', 'date']
