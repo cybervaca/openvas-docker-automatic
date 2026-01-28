@@ -1,0 +1,23 @@
+# Dependencias Mínimas Esenciales para openvas-docker-automatic
+# Instalar con: pip3 install -r requirements-minimal.txt
+
+# === CORE: Python GVM ===
+python-gvm==26.1.0
+
+# === DATA PROCESSING ===
+pandas==2.1.1
+untangle==1.2.1
+
+# === AWS/S3 (Balbix) ===
+boto3==1.34.108
+
+# === MICROSOFT GRAPH/SHAREPOINT ===
+msal
+requests==2.32.4
+
+# === EXCEL/CSV ===
+openpyxl==3.1.2
+
+# === UTILITIES ===
+python-dateutil==2.8.2
+

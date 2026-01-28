@@ -19,11 +19,15 @@ Config/config.json
 
 # Logs
 *.log
-*.txt
 logs/
 taskslog.txt
 tasksend.txt
 logbalbix.txt
+
+# Excluir todos los .txt EXCEPTO requirements
+*.txt
+!requirements*.txt
+!DEPENDENCIAS.md
 
 # CSV y reportes
 Targets_Tasks/openvas.csv
