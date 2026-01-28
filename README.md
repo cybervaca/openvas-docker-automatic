@@ -1,0 +1,1 @@
+# openvas-docker-automatic
