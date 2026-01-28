@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+gvm/
+*.egg-info/
+dist/
+build/
+
+# Virtual Environment
+venv/
+env/
+ENV/
+
+# Configuración
+Config/config.json
+
+# Logs
+*.log
+*.txt
+logs/
+taskslog.txt
+tasksend.txt
+logbalbix.txt
+
+# CSV y reportes
+Targets_Tasks/openvas.csv
+Targets_Tasks/log.txt
+Reports/exports/*.csv
+Reports/exports/vulns_host/*.csv
+Reports/exports/vulns_host/*.xlsx
+Reports/*.csv
+Reports/hosts.csv
+Reports/exclusion.csv
+
+# Archivos temporales
+*.tmp
+*.temp
+.DS_Store
+.vscode/
+.idea/
+
+# Lock files
+.maintenance.lock
+

@@ -1,0 +1,44 @@
+# Changelog
+
+## [2.0.0] - 2026-01-28
+
+### Última actualización
+- Renombrados scripts principales para simplicidad:
+  - `run-task-2.py` → `run-task.py`
+  - `set-tt-2.py` → `set-tt.py`
+- Actualizada toda la documentación con nuevos nombres
+
+## [2.0.0-initial] - 2026-01-28
+
+### Cambios Mayores
+- **Scripts simplificados**: `set-tt.py` y `run-task.py` para comunicación con OpenVAS
+- **Cambio de ruta base**: De `/home/redteam/gvm` a `/opt/gvm/`
+- **Conexión TLS**: Los scripts principales usan conexión TLS (puerto 9390) en lugar de Unix Socket
+
+### Adaptaciones
+- Todos los paths actualizados de `/home/redteam/gvm` a `/opt/gvm/`
+- Scripts de Cron actualizados para nueva ruta base
+- Maintenance script actualizado con nuevos paths
+- Reports scripts adaptados para `/opt/gvm/`
+- Configuración adaptada para nueva estructura
+
+### Características Mantenidas
+- Sistema de lock de mantenimiento
+- Verificación de feeds antes de actualizar (>30 días)
+- Timeout de 8 horas para actualización de feeds
+- Limpieza automática de reportes (90 días)
+- Optimización de base de datos con detención de servicios
+- Separación de CVEs y Misconfigs
+- Subida automática a SharePoint y Balbix/Valbix
+
+### Notas de Migración
+Si vienes del proyecto original (`automatic-openvas`):
+1. Cambiar todas las referencias de `/home/redteam/gvm` a `/opt/gvm/`
+2. Actualizar crontab con nuevos paths
+3. Usar siempre `set-tt.py` y `run-task.py`
+4. Copiar `config.json` a `/opt/gvm/Config/`
+5. Crear directorio `/opt/gvm/` y copiar todos los archivos
+
+### Basado en
+- [automatic-openvas v1.2025.09.02_13](https://github.com/cybervaca/automatic-openvas)
+
