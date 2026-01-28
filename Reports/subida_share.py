@@ -99,43 +99,32 @@ def upload_file(token, site_id, drive_id, local_path, remote_path, overwrite=Fal
         print(f"[ERROR] Falló subida: {resp.status_code} {resp.text}", file=sys.stderr)
         sys.exit(1)
 
-    print(f"[OK] Archivo subido: {file_name} -> {remote_path}")
+    print(f"[OK] Archivo subido: {resp.json()['webUrl']}")
 
 # ==== MAIN ====
 def main():
-    parser = argparse.ArgumentParser(
-        description="Subir un archivo a SharePoint vía Graph API con Client Credentials"
-    )
-    parser.add_argument("-f", "--file", required=True, help="Ruta al archivo local")
-    parser.add_argument(
-        "-p",
-        "--pais",
-        help="País (si no se proporciona, se usa lee_config('pais'))"
-    )
-    parser.add_argument("-a", "--aplicacion", required=True, help="Aplicacion")
-    parser.add_argument("-o", "--overwrite", action="store_true", help="Sobreescribir si existe")
+    parser = argparse.ArgumentParser(description="Subida a SharePoint con Graph API (App-Only Auth)")
+    parser.add_argument("-f", "--file", required=True, help="Ruta local del archivo a subir")
+    parser.add_argument("-p", "--pais", required=True, help="Nombre del país para carpeta")
+    parser.add_argument("-a", "--automatizacion", required=True, help="Nombre de la automatización para carpeta")
+    #parser.add_argument("--overwrite", action="store_true", help="Sobrescribir archivo si existe")
+
     args = parser.parse_args()
-
-    local_file = args.file
-    pais = args.pais if args.pais else lee_config("pais")
-    aplicacion = args.aplicacion
-    overwrite = args.overwrite
-
-    if not os.path.isfile(local_file):
-        print(f"[ERROR] No se encuentra el archivo: {local_file}", file=sys.stderr)
+    lp = Path(args.file)
+    if not lp.is_file():
+        print(f"[ERROR] Archivo no encontrado: {lp}", file=sys.stderr)
         sys.exit(1)
 
-    # p.ej. "Openvas_Interno/PUERTO_RICO"
-    remote_path = f"{aplicacion}/{pais}"
+    # Construir ruta de destino en SharePoint
+    remote_path = f"General/Subidas/{args.pais}/{args.automatizacion}/{SITE}"
 
-    # 1. Obtener token
+    # Obtener token y site/drive ids
     token = get_token()
-    # 2. Obtener site_id y drive_id
     site_id = get_site_id(token)
     drive_id = get_drive_id(token, site_id)
 
-    # 3. Subir el archivo
-    upload_file(token, site_id, drive_id, local_file, remote_path, overwrite)
+    #print(f"[INFO] Subiendo {lp} a {remote_path} (site={site_id}, drive={drive_id})")
+    upload_file(token, site_id, drive_id, str(lp), remote_path, overwrite=True)
 
 if __name__ == "__main__":
     main()
