@@ -39,6 +39,9 @@ Reports/*.csv
 Reports/hosts.csv
 Reports/exclusion.csv
 
+# Permitir .gitkeep para mantener estructura de directorios
+!.gitkeep
+
 # Archivos temporales
 *.tmp
 *.temp

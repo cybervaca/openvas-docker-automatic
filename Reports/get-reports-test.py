@@ -300,6 +300,9 @@ def determinar_severidad(cvss):
 
 def vulns_ip(vulns, host):
     export = '/opt/gvm/Reports/exports/vulns_host'
+    # Crear directorio si no existe
+    os.makedirs(export, exist_ok=True)
+    
     now = datetime.datetime.now()
     year = now.year
     month = now.month
