@@ -125,8 +125,8 @@ def main():
         print(f"[ERROR] No se encuentra el archivo: {local_file}", file=sys.stderr)
         sys.exit(1)
 
-    # p.ej. "Openvas/{pais}/Openvas_Externo/archivo.csv"
-    remote_path = f"{aplicacion}/{pais}/Openvas"
+    # p.ej. "Openvas_Interno/PUERTO_RICO"
+    remote_path = f"{aplicacion}/{pais}"
 
     # 1. Obtener token
     token = get_token()
