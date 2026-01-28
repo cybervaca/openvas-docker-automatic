@@ -15,7 +15,7 @@ import datetime
 import time
 import re
 from pathlib import Path
-from gvm.connections import UnixSocketConnection
+from gvm.connections import TLSConnection
 from gvm.protocols.gmp import Gmp
 import xml.etree.ElementTree as ET
 
@@ -860,8 +860,8 @@ def limpiar_reportes_antiguos(config, report, dry_run=False):
     cutoff_date = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=retention_days)
     
     try:
-        path = '/run/gvmd/gvmd.sock'
-        connection = UnixSocketConnection(path=path)
+        # Usar TLS en lugar de Unix Socket (compatible con Docker)
+        connection = TLSConnection(hostname="127.0.0.1", port=9390)
         
         with Gmp(connection=connection) as gmp:
             user = config.get('user', 'admin')

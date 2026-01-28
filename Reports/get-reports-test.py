@@ -1,7 +1,7 @@
 import pandas as pd
 import getpass
 import xml.etree.ElementTree as ET
-from gvm.connections import UnixSocketConnection
+from gvm.connections import TLSConnection
 from gvm.protocols.gmp import Gmp
 from gvm.xml import pretty_print
 import untangle
@@ -84,8 +84,8 @@ def get_pass():
 
 # Función para conectarse a GVM
 def connect_gvm():
-    path = "/run/gvmd/gvmd.sock"
-    connection = UnixSocketConnection(path=path, timeout=600)
+    # Usar TLS en lugar de Unix Socket (compatible con Docker)
+    connection = TLSConnection(hostname="127.0.0.1", port=9390, timeout=600)
     return connection
 
 # Función para preparar el reporte
