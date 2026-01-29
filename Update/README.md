@@ -1,311 +1,311 @@
 # Update Scripts
 
-Scripts para actualizar componentes de OpenVAS/GVM.
+Script para actualizar el repositorio de automatización de OpenVAS desde GitHub.
 
-## Archivos
-
-### update.py
-Script simple para verificar y actualizar OpenVAS Scanner.
-
-**Funcionalidad:**
-- Lee versión actual de `version.txt`
-- Obtiene última versión de GitHub (greenbone/openvas-scanner)
-- Si hay nueva versión, ejecuta `update-scanner.sh`
-- Envía notificación por email (comentado)
-
-**Uso:**
-```bash
-cd /opt/gvm/Update
-python3 update.py
-```
-
-### update-versiones.py
-Script avanzado para actualizar múltiples componentes GVM.
-
-**Componentes soportados:**
-- GVM_LIBS_VERSION
-- GVMD_VERSION
-- PG_GVM_VERSION
-- GSA_VERSION
-- GSAD_VERSION
-- OPENVAS_SMB_VERSION
-- OPENVAS_SCANNER_VERSION
-- OSPD_OPENVAS_VERSION
-- NOTUS_VERSION
-- REDIS_VERSION
-
-**Funcionalidad:**
-- Obtiene últimas versiones de todos los componentes desde GitHub
-- Compara con versiones instaladas
-- Actualiza si hay diferencias
-- Genera log en `/opt/gvm/logupdates.txt`
-- Guarda resultado en `/opt/gvm/resultado.json`
-- Envía email con resumen (comentado)
-
-**Uso:**
-```bash
-cd /opt/gvm/Update
-python3 update-versiones.py
-```
+## Archivo
 
 ### update-script.py
-Script con funcionalidad de actualización automática del repositorio.
+
+Script para actualizar automáticamente el repositorio manteniendo la configuración de targets.
 
 **Funcionalidad:**
 1. Descarga `export-target.py` desde GitHub
-2. Ejecuta export de targets actuales a `openvas.csv.export`
+2. Exporta los targets actuales a `openvas.csv.export` (backup)
 3. Hace git pull forzado del repositorio
 4. Restaura `openvas.csv` desde el backup
+
+Esto permite actualizar los scripts de automatización sin perder la configuración de targets y tasks existentes.
 
 **Uso:**
 ```bash
 cd /opt/gvm/Update
 python3 update-script.py
 
-# Forzar actualización
+# Forzar actualización aunque la versión sea la misma
 python3 update-script.py --force
 ```
 
 **Argumentos:**
-- `--force`: Forzar actualización aunque la versión sea la misma
+- `--force`: Forzar actualización incluso si la versión local es la misma que la remota
 
-### update-scanner.sh
-Script bash para compilar e instalar OpenVAS Scanner.
+## Cómo Funciona
 
-**Funcionalidad:**
-- Descarga el código fuente de una versión específica
-- Verifica firma GPG
-- Compila con cmake
-- Instala en el sistema
+### Proceso de Actualización
 
-**Uso:**
-```bash
-cd /opt/gvm/Update
-./update-scanner.sh 23.0.1
-```
+1. **Verificación de Versión**
+   - Lee la versión local desde `Config/config_example.json`
+   - Obtiene la versión remota desde GitHub
+   - Compara ambas versiones
 
-**Parámetros:**
-- `$1`: Versión de OpenVAS Scanner (ej: 23.0.1)
+2. **Verificación de Cambios Remotos**
+   - Ejecuta `git fetch origin`
+   - Compara HEAD local con `origin/main`
+   - Detecta si hay commits nuevos en el repositorio remoto
 
-**Directorios usados:**
-- Source: `/opt/gvm/source/`
-- Build: `/opt/gvm/build/openvas-scanner/`
-- Install: `/opt/gvm/install/`
+3. **Backup de Configuración**
+   - Descarga `export-target.py` desde GitHub
+   - Ejecuta el script para exportar todos los targets actuales
+   - Guarda el resultado en `openvas.csv.export`
 
-### update-ospd.sh
-Script bash para actualizar OSPD-OpenVAS (OpenVAS Protocol Daemon).
+4. **Actualización del Repositorio**
+   - Ejecuta `git reset --hard HEAD` (descarta cambios locales)
+   - Ejecuta `git fetch origin`
+   - Ejecuta `git reset --hard origin/main` (actualización forzada)
 
-**Funcionalidad:**
-- Descarga el código fuente de una versión específica
-- Verifica firma GPG
-- Instala con pip3
+5. **Restauración de Configuración**
+   - Copia `openvas.csv.export` a `openvas.csv`
+   - Los targets y tasks se mantienen intactos
 
-**Uso:**
-```bash
-cd /opt/gvm/Update
-./update-ospd.sh 22.6.0
-```
+### Seguridad de Datos
 
-**Parámetros:**
-- `$1`: Versión de OSPD-OpenVAS (ej: 22.6.0)
-
-### version.txt
-Archivo de texto simple que almacena la última versión conocida de OpenVAS Scanner.
-
-**Formato:**
-```
-23.0.1
-```
+El script garantiza que:
+- ✅ Los targets actuales se respaldan antes de actualizar
+- ✅ El archivo `openvas.csv` se restaura después del pull
+- ✅ No se pierden configuraciones de escaneos
+- ✅ Los cambios locales se sobrescriben (actualización limpia)
 
 ## Requisitos
 
 ### Dependencias Python
 ```bash
-pip3 install requests beautifulsoup4
+pip3 install requests
 ```
 
-### Herramientas del sistema
+### Herramientas del Sistema
 - git
-- gpg
-- cmake
-- make
-- gcc/g++
 - python3
-- pip3
 
-### Claves GPG de Greenbone
-Para verificar firmas:
-```bash
-# Importar clave pública de Greenbone
-gpg --keyserver keys.openpgp.org --recv-keys 8AE4BE429B60A59B311C2E739823FAA60ED1E580
-```
-
-## Consideraciones
-
-### Entornos Docker
-Estos scripts están diseñados para **instalaciones nativas** de OpenVAS. En entornos Docker:
-
-- ❌ No usar estos scripts directamente en contenedores
-- ✅ Actualizar la imagen Docker: `docker-compose pull && docker-compose up -d`
-- ✅ Los scripts pueden ejecutarse en el host si OpenVAS está instalado nativamente
-
-### Permisos
-Los scripts de compilación requieren permisos sudo para instalar componentes del sistema.
-
-### Tiempo de Ejecución
-- `update.py`: 1-2 minutos
-- `update-scanner.sh`: 5-15 minutos (compilación)
-- `update-ospd.sh`: 1-3 minutos
-- `update-versiones.py`: 2-5 minutos
-
-### Logs
-- `/opt/gvm/logupdates.txt`: Log de actualizaciones
-- `/opt/gvm/resultado.json`: Últimas versiones obtenidas de GitHub
-
-## Flujo de Actualización Recomendado
-
-### Actualización Manual de OpenVAS Scanner
+### Configuración
+El script requiere que el directorio `/opt/gvm/` sea un repositorio git configurado:
 
 ```bash
-# 1. Verificar versión actual
-openvas -V
-
-# 2. Obtener última versión
-cd /opt/gvm/Update
-python3 update.py
-
-# 3. O manualmente especificar versión
-./update-scanner.sh 23.0.1
-
-# 4. Verificar instalación
-openvas -V
-
-# 5. Reiniciar servicios
-sudo systemctl restart ospd-openvas
-sudo systemctl restart gvmd
-```
-
-### Actualización de Múltiples Componentes
-
-```bash
-# 1. Hacer backup de configuración
 cd /opt/gvm
-tar czf backup-$(date +%Y%m%d).tar.gz Config/ Targets_Tasks/openvas.csv
-
-# 2. Ejecutar update-versiones.py
-cd Update
-python3 update-versiones.py
-
-# 3. Revisar logs
-cat /opt/gvm/logupdates.txt
-cat /opt/gvm/resultado.json
-
-# 4. Reiniciar todos los servicios
-sudo systemctl restart gvmd
-sudo systemctl restart ospd-openvas
-sudo systemctl restart gsad
-sudo systemctl restart notus-scanner
+git remote -v
+# Debe mostrar: origin https://github.com/cybervaca/openvas-docker-automatic.git
 ```
 
-### Actualización del Repositorio de Scripts
+## Cuándo se Ejecuta la Actualización
 
+El script actualiza el repositorio en los siguientes casos:
+
+1. **Versión Diferente**
+   - Si `version` en `config_example.json` local es diferente a la remota
+
+2. **Commits Nuevos Detectados**
+   - Si hay commits en `origin/main` que no están en la rama local
+   - Incluso si la versión es la misma
+
+3. **Modo Forzado**
+   - Si se usa la opción `--force`
+   - Actualiza sin importar versión o commits
+
+4. **Error al Verificar**
+   - Si hay error al leer versiones o verificar git
+   - Para garantizar que siempre esté actualizado
+
+## Logs y Archivos Generados
+
+### Durante la Ejecución
+- **openvas.csv.export**: Backup temporal de targets
+  - Ubicación: `/opt/gvm/Targets_Tasks/openvas.csv.export`
+  - Se genera antes del git pull
+  - Se usa para restaurar después de la actualización
+
+### Salida del Script
 ```bash
-# 1. Ejecutar update-script.py (hace backup automático)
-cd /opt/gvm/Update
-python3 update-script.py
-
-# 2. O manualmente
-cd /opt/gvm
-git pull origin main
-
-# 3. Actualizar dependencias si es necesario
-source gvm/bin/activate
-pip3 install -r requirements.txt --upgrade
+# Ejemplo de salida normal
+Verificando versiones...
+Se detectaron 3 commit(s) remoto(s) disponible(s)
+Paso 1: Descargando export-target.py...
+Archivo descargado: /opt/gvm/Targets_Tasks/export-target.py
+Paso 2: Ejecutando export-target.py...
+Export completado: /opt/gvm/Targets_Tasks/openvas.csv.export
+Paso 3: Haciendo git pull forzado...
+Git pull forzado completado
+Paso 4: Restaurando openvas.csv desde backup...
+Backup restaurado: /opt/gvm/Targets_Tasks/openvas.csv
+Actualización completada exitosamente
 ```
 
 ## Automatización con Cron
 
-### Actualización semanal de OpenVAS Scanner
+### Actualización Diaria del Repositorio
 ```bash
 crontab -e
 ```
 
 Agregar:
 ```cron
-# Verificar actualizaciones de OpenVAS Scanner cada domingo a las 3:00 AM
-0 3 * * 0 /usr/bin/python3 /opt/gvm/Update/update.py >> /opt/gvm/logs/update.log 2>&1
+# Verificar actualizaciones del repositorio diariamente a las 2:00 AM
+0 2 * * * cd /opt/gvm && source gvm/bin/activate && python3 /opt/gvm/Update/update-script.py >> /opt/gvm/logs/update-repo.log 2>&1
 ```
 
-### Actualización mensual de componentes
+### Actualización Semanal
 ```cron
-# Verificar actualizaciones de todos los componentes el primer día del mes
-0 4 1 * * /usr/bin/python3 /opt/gvm/Update/update-versiones.py >> /opt/gvm/logs/update-versiones.log 2>&1
+# Verificar actualizaciones cada lunes a las 3:00 AM
+0 3 * * 1 cd /opt/gvm && source gvm/bin/activate && python3 /opt/gvm/Update/update-script.py >> /opt/gvm/logs/update-repo.log 2>&1
+```
+
+### Forzar Actualización Mensual
+```cron
+# Forzar actualización el primer día de cada mes
+0 4 1 * * cd /opt/gvm && source gvm/bin/activate && python3 /opt/gvm/Update/update-script.py --force >> /opt/gvm/logs/update-repo.log 2>&1
+```
+
+## Ejemplos de Uso
+
+### Actualización Manual
+```bash
+# Navegar al directorio
+cd /opt/gvm/Update
+
+# Activar entorno virtual si es necesario
+source ../gvm/bin/activate
+
+# Ejecutar actualización
+python3 update-script.py
+```
+
+### Verificar Estado Antes de Actualizar
+```bash
+cd /opt/gvm
+
+# Ver versión local
+cat Config/config_example.json | grep version
+
+# Ver última versión en GitHub
+curl -s https://raw.githubusercontent.com/cybervaca/openvas-docker-automatic/main/Config/config_example.json | grep version
+
+# Ver commits pendientes
+git fetch origin
+git log HEAD..origin/main --oneline
+```
+
+### Actualización Forzada
+```bash
+cd /opt/gvm/Update
+python3 update-script.py --force
+```
+
+### Ver Qué Cambió Después de Actualizar
+```bash
+cd /opt/gvm
+git log -5 --oneline
+git show --stat
 ```
 
 ## Troubleshooting
 
-### Error: No se puede descargar desde GitHub
+### Error: No se puede conectar a GitHub
 ```bash
 # Verificar conectividad
 curl -I https://github.com
 
-# Verificar proxy si es necesario
-export HTTP_PROXY=http://proxy:8080
-export HTTPS_PROXY=http://proxy:8080
+# Verificar configuración de git
+cd /opt/gvm
+git remote -v
+
+# Si falla, reconfigurar remote
+git remote set-url origin https://github.com/cybervaca/openvas-docker-automatic.git
 ```
 
-### Error: Falla verificación GPG
+### Error: Git pull forzado falla
 ```bash
-# Importar clave de Greenbone
-gpg --keyserver keys.openpgp.org --recv-keys 8AE4BE429B60A59B311C2E739823FAA60ED1E580
+# Verificar estado del repositorio
+cd /opt/gvm
+git status
 
-# O descargar manualmente
-wget https://www.greenbone.net/GBCommunitySigningKey.asc
-gpg --import GBCommunitySigningKey.asc
+# Limpiar cambios locales manualmente
+git reset --hard HEAD
+git clean -fd
+
+# Intentar actualización manual
+git fetch origin
+git reset --hard origin/main
 ```
 
-### Error: Falla compilación
+### Error: No se encuentra export-target.py
 ```bash
-# Verificar dependencias
-sudo apt-get install -y \
-  build-essential cmake pkg-config \
-  libglib2.0-dev libgpgme-dev libgnutls28-dev uuid-dev \
-  libssh-gcrypt-dev libhiredis-dev libxml2-dev libpcap-dev \
-  libnet1-dev libpaho-mqtt-dev libbsd-dev libgcrypt20-dev
-
-# Limpiar directorios de build
-rm -rf /opt/gvm/build/*
-rm -rf /opt/gvm/source/*
+# Descargar manualmente
+cd /opt/gvm/Targets_Tasks
+wget https://raw.githubusercontent.com/cybervaca/openvas-docker-automatic/main/Targets_Tasks/export-target.py
+chmod +x export-target.py
 ```
 
-### Error: Falta espacio en disco
+### Error: Falla al ejecutar export-target.py
 ```bash
-# Verificar espacio
-df -h
+# Verificar que exista config.json
+ls -la /opt/gvm/Config/config.json
 
-# Limpiar archivos temporales
-rm -rf /opt/gvm/build/*
-rm -rf /opt/gvm/source/*
-rm -rf /opt/gvm/install/*
+# Verificar conexión a OpenVAS
+cd /opt/gvm/Targets_Tasks
+python3 export-target.py -c /opt/gvm/Config/config.json -o /opt/gvm/Targets_Tasks/openvas.csv.export
+```
+
+### Backup se Perdió
+```bash
+# Si openvas.csv.export no existe después de error
+cd /opt/gvm/Targets_Tasks
+
+# Restaurar desde git (última versión commiteada)
+git checkout HEAD -- openvas.csv
+
+# O recrear manualmente desde la interfaz de OpenVAS
+# y luego crear el CSV con el formato: Titulo;Rango;Desc
+```
+
+### Actualización No Detecta Cambios
+```bash
+# Forzar actualización
+cd /opt/gvm/Update
+python3 update-script.py --force
+
+# O actualizar manualmente
+cd /opt/gvm
+git pull origin main
 ```
 
 ## Notas Importantes
 
-1. **Backup**: Siempre hacer backup antes de actualizar componentes críticos
-2. **Feeds**: Después de actualizar, ejecutar sincronización de feeds:
-   ```bash
-   sudo greenbone-feed-sync --type GVMD_DATA
-   sudo greenbone-feed-sync --type SCAP
-   sudo greenbone-feed-sync --type CERT
-   ```
-3. **Servicios**: Reiniciar servicios después de cada actualización
-4. **Testing**: Verificar funcionalidad después de actualizar (crear target de prueba y ejecutar scan)
-5. **Docker**: Si usas Docker, es preferible actualizar la imagen del contenedor en lugar de compilar manualmente
+1. **Backup Automático**: El script siempre hace backup de `openvas.csv` antes de actualizar
+2. **Actualización Limpia**: Los cambios locales se descartan (`git reset --hard`)
+3. **Verificación Dual**: Verifica tanto versión como commits nuevos
+4. **Configuración Segura**: `openvas.csv` se restaura automáticamente después del pull
+5. **No Actualiza OpenVAS**: Solo actualiza los scripts de automatización, no OpenVAS en sí
+
+## ¿Qué NO Hace Este Script?
+
+❌ No actualiza componentes de OpenVAS (gvmd, ospd-openvas, scanner, etc.)
+❌ No actualiza feeds de vulnerabilidades
+❌ No reinicia servicios de OpenVAS
+❌ No modifica la instalación de OpenVAS
+❌ No actualiza la base de datos de OpenVAS
+
+✅ Solo actualiza los scripts Python y shell de automatización
+✅ Solo actualiza documentación y configuración del repositorio
+✅ Solo hace git pull del repositorio `openvas-docker-automatic`
+
+## Para Actualizar OpenVAS en Docker
+
+Si necesitas actualizar OpenVAS (no los scripts), usa Docker:
+
+```bash
+# Detener contenedor
+docker-compose down
+
+# Actualizar imagen
+docker-compose pull
+
+# Iniciar con nueva versión
+docker-compose up -d
+
+# Ver logs
+docker-compose logs -f
+```
 
 ## Referencias
 
-- [Greenbone GitHub](https://github.com/greenbone)
-- [OpenVAS Scanner Releases](https://github.com/greenbone/openvas-scanner/releases)
-- [GVM Building Guide](https://greenbone.github.io/docs/latest/building.html)
-- [Documentación GVM](https://docs.greenbone.net/)
-
+- [Repositorio GitHub](https://github.com/cybervaca/openvas-docker-automatic)
+- [Documentación Principal](../README.md)
+- [Guía Docker](../DOCKER.md)
+- [Changelog](../CHANGELOG.md)
