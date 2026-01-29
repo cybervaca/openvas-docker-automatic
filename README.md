@@ -9,7 +9,37 @@ Este proyecto está adaptado para:
 - Usar la ruta `/opt/gvm/` en lugar de `/home/redteam/gvm`
 - Optimizado para entornos Docker y contenedores
 
-## Instalación
+## Opciones de Instalación
+
+### Opción 1: Despliegue con Docker (Recomendado)
+
+La forma más rápida y sencilla es usar Docker Compose:
+
+```bash
+# Clonar el repositorio
+cd /opt
+git clone <repo-url> gvm
+cd gvm
+
+# Iniciar OpenVAS con Docker
+docker-compose up -d
+
+# Configurar scripts de automatización en el host
+python3 -m venv gvm
+source gvm/bin/activate
+pip3 install -r requirements.txt
+
+# Configurar
+cd Config
+cp config_example.json config.json
+# Editar config.json con tus valores
+```
+
+**Ver documentación completa**: [DOCKER.md](DOCKER.md)
+
+### Opción 2: Instalación Nativa
+
+## Instalación Nativa
 
 ```bash
 # Clonar o copiar el proyecto a la ubicación deseada:

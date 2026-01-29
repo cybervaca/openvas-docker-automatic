@@ -1,5 +1,37 @@
 # Changelog
 
+## [2.1.0] - 2026-01-29
+
+### Añadido
+- Archivo `docker-compose.yml` para despliegue con Docker
+- Documentación completa de Docker en `DOCKER.md`:
+  - Guía de instalación y configuración
+  - Integración con scripts de automatización
+  - Troubleshooting específico para Docker
+  - Información de seguridad y reverse proxy
+  - Backup y restauración de datos
+- Sección en README.md sobre instalación con Docker
+
+### Mejorado
+- Script `subida_share.py` refactorizado:
+  - Cambio de argumento `-a` de 'aplicacion' a 'automatizacion'
+  - Argumento `-p/--pais` ahora es requerido
+  - Nueva estructura de ruta: `General/Subidas/{pais}/{automatizacion}/{SITE}`
+  - Muestra URL completa de SharePoint en mensaje de éxito
+  - Overwrite forzado por defecto
+  - Validación de archivos con `Path()`
+
+### Corregido
+- Ruta de subida a SharePoint corregida para eliminar carpeta redundante
+- Creación automática de directorios `Reports/exports/` y `Reports/exports/vulns_host/`
+- Cambio de `UnixSocketConnection` a `TLSConnection` en todos los scripts para compatibilidad con Docker
+- Archivos `.gitkeep` añadidos para asegurar estructura de directorios en Git
+
+### Documentación
+- README.md actualizado con opciones de instalación (Docker y Nativa)
+- DOCKER.md con guía completa de despliegue en contenedores
+- Mejoras en documentación de troubleshooting
+
 ## [2.0.0] - 2026-01-28
 
 ### Última actualización
