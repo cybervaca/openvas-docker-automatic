@@ -3,6 +3,9 @@ import argparse
 import json
 import csv
 import xml.etree.ElementTree as ET
+import subprocess
+import sys
+import os
 
 from gvm.connections import TLSConnection
 from gvm.protocols.gmp import Gmp
@@ -59,10 +62,56 @@ def export_targets_csv(config_path: str, csv_path: str, page_size: int = 1000) -
             else:
                 # Si no hay rangos, escribir una fila vacía
                 writer.writerow([titulo, "", desc])
+    
+    return len(all_targets)
+
+def upload_to_sharepoint(csv_path: str, config_path: str) -> bool:
+    """
+    Sube el CSV exportado a SharePoint usando subida_share.py
+    NOTA: subida_share.py lee el config de /opt/gvm/Config/config.json
+          así que solo funciona si ese archivo tiene las credenciales correctas
+    """
+    # Cargar config para obtener país
+    with open(config_path, 'r', encoding='utf-8') as f:
+        config = json.load(f)
+    pais = config.get("pais", "UNKNOWN")
+    
+    # Verificar que existe el archivo a subir
+    if not os.path.isfile(csv_path):
+        print(f"[ERROR] No se encuentra el archivo: {csv_path}", file=sys.stderr)
+        return False
+    
+    # Ruta al script de subida
+    subida_script = "/opt/gvm/Reports/subida_share.py"
+    if not os.path.isfile(subida_script):
+        print(f"[ERROR] No se encuentra subida_share.py: {subida_script}", file=sys.stderr)
+        return False
+    
+    # IMPORTANTE: subida_share.py lee /opt/gvm/Config/config.json automáticamente
+    # Si estás usando un config diferente (-c), la subida puede fallar
+    if config_path != "/opt/gvm/Config/config.json":
+        print(f"[WARNING] Usando config no estándar: {config_path}")
+        print(f"[WARNING] subida_share.py leerá /opt/gvm/Config/config.json para credenciales SharePoint")
+    
+    # Ejecutar subida_share.py
+    print(f"[INFO] Subiendo {csv_path} a SharePoint...")
+    result = subprocess.run([
+        "python3", subida_script,
+        "-f", csv_path,
+        "-p", pais,
+        "-a", "Targets_Export"
+    ], capture_output=True, text=True)
+    
+    if result.returncode == 0:
+        print(result.stdout)
+        return True
+    else:
+        print(f"[ERROR] Fallo al subir a SharePoint: {result.stderr}", file=sys.stderr)
+        return False
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Exporta todos los targets de OpenVAS a CSV (Titulo;Rango;Desc)"
+        description="Exporta todos los targets de OpenVAS a CSV y opcionalmente los sube a SharePoint"
     )
     parser.add_argument(
         "-c", "--config",
@@ -78,8 +127,30 @@ if __name__ == "__main__":
         "--page-size",
         type=int,
         default=1000,
-        help="Número de elementos a solicitar en cada página (no debe superar el límite Max Rows Per Page)"
+        help="Número de elementos a solicitar en cada página (no debe superar el límite Max Rows Per Page)"
+    )
+    parser.add_argument(
+        "--upload",
+        action="store_true",
+        help="Subir el CSV exportado a SharePoint después de generarlo"
     )
     args = parser.parse_args()
-    export_targets_csv(args.config, args.output, args.page_size)
+    
+    # Exportar targets
+    print(f"[INFO] Exportando targets desde OpenVAS...")
+    num_targets = export_targets_csv(args.config, args.output, args.page_size)
+    print(f"[OK] Exportados {num_targets} targets a {args.output}")
+    
+    # Subir a SharePoint si se solicitó
+    if args.upload:
+        success = upload_to_sharepoint(args.output, args.config)
+        if success:
+            print("[OK] Exportación y subida completadas exitosamente")
+            sys.exit(0)
+        else:
+            print("[ERROR] Exportación OK pero fallo la subida a SharePoint", file=sys.stderr)
+            sys.exit(1)
+    else:
+        print("[INFO] Para subir a SharePoint, usar --upload")
+        sys.exit(0)
 

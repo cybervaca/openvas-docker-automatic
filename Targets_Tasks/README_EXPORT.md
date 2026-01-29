@@ -30,6 +30,12 @@ python3 export-target.py -c /ruta/config.json -o targets_export.csv
 
 # Ajustar tamaño de página (si tienes muchos targets)
 python3 export-target.py --page-size 500
+
+# ⭐ NUEVO: Exportar Y subir a SharePoint automáticamente
+python3 export-target.py --upload
+
+# Exportar con nombre personalizado y subir
+python3 export-target.py -o targets_backup.csv --upload
 ```
 
 ### Argumentos
@@ -39,6 +45,7 @@ python3 export-target.py --page-size 500
 | `--config` | `-c` | `/opt/gvm/Config/config.json` | Ruta al archivo de configuración |
 | `--output` | `-o` | `openvas.csv` | Archivo CSV de salida |
 | `--page-size` | - | `1000` | Elementos por página (paginación) |
+| `--upload` | - | `False` | Subir el CSV a SharePoint después de exportar |
 
 ### Formato de Salida
 
@@ -61,6 +68,9 @@ Servidores_DMZ;10.0.1.11;Servidor DB
 # Crear backup antes de git pull
 cd /opt/gvm/Targets_Tasks
 python3 export-target.py -o openvas.csv.backup
+
+# O crear backup Y subirlo a SharePoint
+python3 export-target.py -o openvas.csv.backup --upload
 
 # Actualizar repositorio
 cd /opt/gvm
