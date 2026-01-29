@@ -1,5 +1,4 @@
 import pandas as pd
-import getpass
 import xml.etree.ElementTree as ET
 from gvm.connections import TLSConnection
 from gvm.protocols.gmp import Gmp
@@ -76,11 +75,6 @@ def email(configuracion):
     finally:
         # Cierra la conexión
         smtp.quit()
-
-# Función para obtener la contraseña
-def get_pass():
-    password = getpass.getpass(prompt="Enter password: ")
-    return password
 
 # Función para conectarse a GVM
 def connect_gvm():
@@ -207,12 +201,23 @@ def delete_duplicates(files, export, host):
     #subprocess.run(["python3", "/opt/gvm/Reports/upload-reports.py"] + [file_unif])
     #fin externa
     #enviamos sharepoint
-    subprocess.run(["python3", "/opt/gvm/Reports/subida_share.py", "-f", file_unif, 
+    print(f"[INFO] Subiendo {file_unif} a SharePoint...")
+    result = subprocess.run(["python3", "/opt/gvm/Reports/subida_share.py", "-f", file_unif, 
     "-p", pais, 
-    "-a", 'Openvas_Interno'])
-    subprocess.run(["python3", "/opt/gvm/Reports/subida_share.py", "-f", file_excel,  
+    "-a", 'Openvas_Interno'], capture_output=True, text=True)
+    if result.returncode != 0:
+        print(f"[ERROR] Fallo subida CSV: {result.stderr}")
+    else:
+        print(result.stdout)
+    
+    print(f"[INFO] Subiendo {file_excel} a SharePoint...")
+    result = subprocess.run(["python3", "/opt/gvm/Reports/subida_share.py", "-f", file_excel,  
     "-p", pais,
-    "-a", 'Openvas_Interno'])
+    "-a", 'Openvas_Interno'], capture_output=True, text=True)
+    if result.returncode != 0:
+        print(f"[ERROR] Fallo subida Excel: {result.stderr}")
+    else:
+        print(result.stdout)
     separar_cve(file_unif)
 
 # Función para separar CVEs y misconfiguraciones
@@ -410,9 +415,14 @@ def get_tasks_and_exclusions(connection, user, password, pais):
                     writer.writeheader()
                 writer.writerows(new_records)
                 
-        subprocess.run(["python3", "/opt/gvm/Reports/subida_share.py", "-f", CSV_FILE, 
+        print(f"[INFO] Subiendo {CSV_FILE} a SharePoint...")
+        result = subprocess.run(["python3", "/opt/gvm/Reports/subida_share.py", "-f", CSV_FILE, 
         "-p", pais, 
-        "-a", 'Openvas_Interno'])
+        "-a", 'Openvas_Interno'], capture_output=True, text=True)
+        if result.returncode != 0:
+            print(f"[ERROR] Fallo subida exclusion.csv: {result.stderr}")
+        else:
+            print(result.stdout)
 
 if __name__ == "__main__":
     dir_csv = '/opt/gvm/Reports/exports/'
