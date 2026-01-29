@@ -19,24 +19,23 @@ Exporta todos los targets de OpenVAS al formato CSV compatible con `set-tt.py`.
 ```bash
 cd /opt/gvm/Targets_Tasks
 
-# Exportar con valores por defecto
+# Exportar y subir a SharePoint (comportamiento por defecto)
 python3 export-target.py
 
-# Especificar archivo de salida
+# Especificar archivo de salida (también sube)
 python3 export-target.py -o backup.csv
 
-# Especificar config personalizado
+# Especificar config personalizado (también sube)
 python3 export-target.py -c /ruta/config.json -o targets_export.csv
 
-# Ajustar tamaño de página (si tienes muchos targets)
+# Ajustar tamaño de página (también sube)
 python3 export-target.py --page-size 500
 
-# ⭐ NUEVO: Exportar Y subir a SharePoint automáticamente
-python3 export-target.py --upload
-
-# Exportar con nombre personalizado y subir
-python3 export-target.py -o targets_backup.csv --upload
+# Solo exportar SIN subir a SharePoint
+python3 export-target.py -o local_only.csv --no-upload
 ```
+
+**IMPORTANTE:** Por defecto SIEMPRE sube a SharePoint. Usa `--no-upload` si solo quieres exportar localmente.
 
 ### Argumentos
 
@@ -45,7 +44,7 @@ python3 export-target.py -o targets_backup.csv --upload
 | `--config` | `-c` | `/opt/gvm/Config/config.json` | Ruta al archivo de configuración |
 | `--output` | `-o` | `openvas.csv` | Archivo CSV de salida |
 | `--page-size` | - | `1000` | Elementos por página (paginación) |
-| `--upload` | - | `False` | Subir el CSV a SharePoint después de exportar |
+| `--no-upload` | - | `False` | NO subir a SharePoint (por defecto siempre sube) |
 
 ### Formato de Salida
 
@@ -104,12 +103,20 @@ python3 export-target.py -o audit_$(date +%Y%m%d).csv
 cat audit_20260129.csv
 ```
 
-#### 4. Integración con update-script.py
+#### 4. Integración Automática
 
-Este script es usado automáticamente por `update-script.py` para:
-1. Hacer backup antes de `git pull`
-2. Preservar configuración de targets
-3. Restaurar después de la actualización
+Este script se ejecuta automáticamente en:
+
+**a) `get-reports-test.py` (después de subir reportes):**
+- Exporta targets actuales
+- Sube automáticamente a SharePoint
+- Se ejecuta cada vez que se generan reportes
+
+**b) `update-script.py` (al actualizar repo):**
+- Descarga última versión desde GitHub
+- Exporta targets como backup
+- Preserva configuración antes de `git pull`
+- Restaura después de la actualización
 
 ### Conexión
 

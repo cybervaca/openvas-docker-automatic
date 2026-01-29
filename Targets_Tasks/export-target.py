@@ -130,9 +130,9 @@ if __name__ == "__main__":
         help="Número de elementos a solicitar en cada página (no debe superar el límite Max Rows Per Page)"
     )
     parser.add_argument(
-        "--upload",
+        "--no-upload",
         action="store_true",
-        help="Subir el CSV exportado a SharePoint después de generarlo"
+        help="NO subir el CSV a SharePoint (por defecto siempre sube)"
     )
     args = parser.parse_args()
     
@@ -141,8 +141,8 @@ if __name__ == "__main__":
     num_targets = export_targets_csv(args.config, args.output, args.page_size)
     print(f"[OK] Exportados {num_targets} targets a {args.output}")
     
-    # Subir a SharePoint si se solicitó
-    if args.upload:
+    # Subir a SharePoint (siempre, excepto si se usa --no-upload)
+    if not args.no_upload:
         success = upload_to_sharepoint(args.output, args.config)
         if success:
             print("[OK] Exportación y subida completadas exitosamente")
@@ -151,6 +151,6 @@ if __name__ == "__main__":
             print("[ERROR] Exportación OK pero fallo la subida a SharePoint", file=sys.stderr)
             sys.exit(1)
     else:
-        print("[INFO] Para subir a SharePoint, usar --upload")
+        print("[INFO] Subida a SharePoint omitida (--no-upload)")
         sys.exit(0)
 

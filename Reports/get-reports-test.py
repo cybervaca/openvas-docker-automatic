@@ -423,6 +423,17 @@ def get_tasks_and_exclusions(connection, user, password, pais):
             print(f"[ERROR] Fallo subida exclusion.csv: {result.stderr}")
         else:
             print(result.stdout)
+    
+    # Exportar y subir targets actuales a SharePoint
+    print(f"[INFO] Exportando targets actuales...")
+    export_script = "/opt/gvm/Targets_Tasks/export-target.py"
+    export_output = f"/opt/gvm/Targets_Tasks/targets_export_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.csv"
+    result = subprocess.run(["python3", export_script, "-o", export_output], 
+                          capture_output=True, text=True)
+    if result.returncode == 0:
+        print(result.stdout)
+    else:
+        print(f"[ERROR] Fallo export de targets: {result.stderr}")
 
 if __name__ == "__main__":
     dir_csv = '/opt/gvm/Reports/exports/'
