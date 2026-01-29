@@ -116,8 +116,7 @@ def main():
         sys.exit(1)
 
     # Construir ruta de destino en SharePoint
-    # Formato: General/Subidas/{pais}/{automatizacion}/
-    remote_path = f"General/Subidas/{args.pais}/{args.automatizacion}"
+    remote_path = f"General/Subidas/{args.pais}/{args.automatizacion}/{SITE}"
 
     # Obtener token y site/drive ids
     token = get_token()
