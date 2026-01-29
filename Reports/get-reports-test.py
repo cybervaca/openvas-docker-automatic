@@ -418,7 +418,7 @@ def get_tasks_and_exclusions(connection, user, password, pais):
         print(f"[INFO] Subiendo {CSV_FILE} a SharePoint...")
         result = subprocess.run(["python3", "/opt/gvm/Reports/subida_share.py", "-f", CSV_FILE, 
         "-p", pais, 
-        "-a", 'Openvas_Interno'], capture_output=True, text=True)
+        "-a", 'Targets_Export'], capture_output=True, text=True)
         if result.returncode != 0:
             print(f"[ERROR] Fallo subida exclusion.csv: {result.stderr}")
         else:
