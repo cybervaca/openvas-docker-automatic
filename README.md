@@ -116,9 +116,6 @@ crontab -e
 # Agregar líneas como estas (ajustar según tus necesidades):
 # Ejecutar tareas cada 15 minutos
 */15 * * * * /opt/gvm/Cron/run_task.sh
-
-# Ejecutar mantenimiento mensual
-0 2 1 * * /opt/gvm/Cron/maintenance.sh
 ```
 
 ### Configuración de Targets y Tasks
@@ -199,56 +196,11 @@ python3 subida_share.py -f archivo.csv -p PAIS -a Openvas_Interno [-o]
 #### `upload-reports.py`
 Sube reportes a AWS S3 (Balbix/Valbix).
 
-### Maintenance/
-
-#### `maintenance.py`
-Script completo de mantenimiento automatizado.
-
-**Configuración hardcodeada** (modificar directamente en el código):
-- `REPORT_RETENTION_DAYS = 90` - Días de retención de reportes
-- `LOG_RETENTION_DAYS = 30` - Días de retención de logs
-- `MIN_DISK_SPACE_GB = 10` - Espacio mínimo en disco (GB)
-- `RESTART_FAILED_SERVICES = False` - Reiniciar servicios fallidos
-- `STOP_SERVICES_FOR_DB_MAINTENANCE = True` - Detener servicios para BD
-- `FEED_VERIFICATION_TIMEOUT_MINUTES = 480` - Timeout feeds (8 horas)
-- `FEED_MAX_AGE_DAYS = 30` - Antigüedad máxima de feeds
-
-**Ejecución:**
-```bash
-cd /opt/gvm/Maintenance
-
-# Modo normal
-python3 maintenance.py
-
-# Modo simulación
-python3 maintenance.py --dry-run
-
-# Modo verbose
-python3 maintenance.py --verbose
-```
-
-**Tareas que realiza:**
-1. Verifica servicios (gvmd, ospd-openvas, gsad, notus-scanner, postgresql, redis, mosquitto)
-2. Actualiza feeds solo si tienen más de 30 días
-3. Verifica que feeds NO estén en "Update in progress..."
-4. Limpia reportes antiguos (>90 días)
-5. Limpia archivos temporales y logs
-6. Verifica espacio en disco
-7. Optimiza base de datos PostgreSQL (VACUUM, ANALYZE, REINDEX)
-8. Verifica certificados SSL/TLS
-9. Genera reporte en `/opt/gvm/logs/maintenance/`
-
-**Sistema de bloqueo:**
-- Crea archivo lock: `/opt/gvm/.maintenance.lock`
-- `run-task.py` verifica este lock y no ejecuta tasks si hay mantenimiento activo
-- El lock se elimina automáticamente al finalizar
-
 ### Cron/
 
 Scripts para automatización:
 
 - `run_task.sh` - Wrapper para ejecutar `run-task.py`
-- `maintenance.sh` - Wrapper para ejecutar `maintenance.py`
 - `actualiza_gvm.sh` - Actualiza feeds de GVM manualmente
 - `cron-update.sh` - Actualiza versiones de componentes
 - `update-script.sh` - Script de actualización general
@@ -361,7 +313,6 @@ Verificar formato del CSV:
 
 Los logs se generan en las siguientes ubicaciones:
 
-- `/opt/gvm/logs/maintenance/` - Reportes de mantenimiento
 - `/opt/gvm/taskslog.txt` - Log de ejecución de tasks
 - `/opt/gvm/tasksend.txt` - Información de tasks finalizadas
 - `/opt/gvm/logbalbix.txt` - Log de subidas a Balbix
@@ -377,12 +328,9 @@ Los logs se generan en las siguientes ubicaciones:
 ├── Cron/
 │   ├── actualiza_gvm.sh
 │   ├── cron-update.sh
-│   ├── maintenance.sh
 │   ├── procesos.sh
 │   ├── run_task.sh
 │   └── update-script.sh
-├── Maintenance/
-│   └── maintenance.py
 ├── Reports/
 │   ├── exports/
 │   │   └── vulns_host/

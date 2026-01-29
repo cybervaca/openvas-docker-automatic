@@ -34,7 +34,6 @@ Todos los archivos modificados:
 - ✅ `Reports/get-reports-test.py` - `/opt/gvm/Reports` y `/opt/gvm/Config/config.json`
 - ✅ `Reports/subida_share.py` - `/opt/gvm/Config/config.json`
 - ✅ `Reports/upload-reports.py` - `/opt/gvm/Config/config.json` y `/opt/gvm/Targets_Tasks/delete-files.py`
-- ✅ `Maintenance/maintenance.py` - `/opt/gvm/` en todas las rutas y locks
 - ✅ `Cron/*.sh` - `/opt/gvm/` en todas las rutas
 
 ### 3. Scripts que SIEMPRE se Usan
@@ -45,21 +44,8 @@ Todos los archivos modificados:
 | `run-task.py` | Ejecutar y gestionar tasks | TLS (9390) |
 | `get-reports-test.py` | Exportar reportes | Unix Socket |
 | `delete-files.py` | Limpiar BD y archivos | Unix Socket |
-| `maintenance.py` | Mantenimiento completo | Unix Socket |
 
-### 4. Archivo de Lock de Mantenimiento
-
-**Antes:**
-```
-/home/redteam/gvm/.maintenance.lock
-```
-
-**Ahora:**
-```
-/opt/gvm/.maintenance.lock
-```
-
-### 5. Configuración
+### 4. Configuración
 
 **Ubicación:**
 - Antes: `/home/redteam/gvm/Config/config.json`
@@ -68,10 +54,9 @@ Todos los archivos modificados:
 **Lectura en scripts:**
 - Todos los scripts adaptados para leer desde `/opt/gvm/Config/config.json`
 
-### 6. Logs
+### 5. Logs
 
 **Ubicaciones actualizadas:**
-- `/opt/gvm/logs/maintenance/` - Reportes de mantenimiento
 - `/opt/gvm/taskslog.txt` - Log de ejecución de tasks
 - `/opt/gvm/tasksend.txt` - Información de tasks finalizadas
 - `/opt/gvm/logbalbix.txt` - Log de subidas a Balbix
@@ -95,7 +80,6 @@ VIRTUAL_ENV="/opt/gvm/gvm"
 | **Scripts principales** | `set-TT.py` (mezcla) | `set-tt.py`, `run-task.py` |
 | **Conexión targets/tasks** | Variable | TLS (9390) |
 | **Conexión reportes** | Unix Socket | Unix Socket |
-| **Lock mantenimiento** | `/home/redteam/gvm/.maintenance.lock` | `/opt/gvm/.maintenance.lock` |
 | **Config path** | `/home/redteam/gvm/Config/` | `/opt/gvm/Config/` |
 | **Entorno virtual** | `/home/redteam/gvm/gvm/` | `/opt/gvm/gvm/` |
 
@@ -114,9 +98,7 @@ VIRTUAL_ENV="/opt/gvm/gvm"
 - ✅ `Reports/get-reports-test.py`
 - ✅ `Reports/subida_share.py`
 - ✅ `Reports/upload-reports.py`
-- ✅ `Maintenance/maintenance.py`
 - ✅ `Cron/run_task.sh`
-- ✅ `Cron/maintenance.sh`
 - ✅ `Cron/actualiza_gvm.sh`
 - ✅ `Cron/cron-update.sh`
 - ✅ `Cron/update-script.sh`

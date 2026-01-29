@@ -17,7 +17,6 @@ defusedxml==0.7.1         # XML seguro
 - `run-task.py` - Ejecutar tasks
 - `get-reports-test.py` - Exportar reportes
 - `delete-files.py` - Limpiar BD
-- `maintenance.py` - Mantenimiento
 
 ---
 
@@ -102,7 +101,6 @@ tzdata==2023.4            # Data de zonas horarias
 ```
 **Usado en:**
 - Todos los scripts que generan logs con timestamps
-- `maintenance.py` - Cálculos de antigüedad
 
 ---
 
@@ -189,7 +187,6 @@ by python-gvm 26.1.0
 | `delete-files.py` | python-gvm |
 | `upload-reports.py` | boto3, awscli |
 | `subida_share.py` | msal, requests |
-| `maintenance.py` | python-gvm |
 
 ---
 
@@ -217,4 +214,5 @@ pip3 freeze > requirements-frozen.txt
 # Exportar solo dependencias top-level
 pip3 list --format=freeze | grep -E "^(python-gvm|pandas|boto3|msal|openpyxl)" > requirements-minimal-frozen.txt
 ```
+
 

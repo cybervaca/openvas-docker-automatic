@@ -4,3 +4,4 @@ Red_Interna_10;10.0.0.0/24;Escaneo de red interna segmento 10
 Servidores_DMZ;172.16.0.0/24;Escaneo de servidores en DMZ
 Red_Produccion;10.10.0.0/16;Escaneo completo red de producción
 
+

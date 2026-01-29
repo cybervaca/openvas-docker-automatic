@@ -163,15 +163,10 @@ python3 set-tt.py
 
 # Ejecutar tareas
 python3 run-task.py
-
-# Mantenimiento
-cd ../Maintenance
-python3 maintenance.py
 ```
 
 Los scripts se conectan al contenedor usando:
-- **TLS**: `127.0.0.1:9390` (Targets_Tasks)
-- **Unix Socket**: `/run/gvmd/gvmd.sock` (Reports, Maintenance - si el socket está accesible)
+- **TLS**: `127.0.0.1:9390` (Targets_Tasks, Reports)
 
 ### Conexión TLS vs Unix Socket
 
@@ -195,9 +190,6 @@ Agregar:
 ```cron
 # Ejecutar tareas cada 15 minutos
 */15 * * * * /opt/gvm/Cron/run_task.sh
-
-# Mantenimiento mensual
-0 2 1 * * /opt/gvm/Cron/maintenance.sh
 ```
 
 ## Seguridad

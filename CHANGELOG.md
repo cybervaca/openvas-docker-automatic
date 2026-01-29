@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.2.0] - 2026-01-29
+
+### Eliminado
+- `Maintenance/maintenance.py` - Script de mantenimiento completo removido
+- `Cron/maintenance.sh` - Wrapper de mantenimiento eliminado
+- Sistema de lock de mantenimiento (`.maintenance.lock`) eliminado de `run-task.py`
+- Referencias a mantenimiento eliminadas de toda la documentación
+
+### Actualizado
+- `Targets_Tasks/run-task.py` - Eliminada verificación de lock de mantenimiento
+- Documentación actualizada (README.md, DOCKER.md, INICIO_RAPIDO.md, DIFERENCIAS.md, DEPENDENCIAS.md)
+
 ## [2.1.0] - 2026-01-29
 
 ### Añadido
@@ -50,7 +62,6 @@
 ### Adaptaciones
 - Todos los paths actualizados de `/home/redteam/gvm` a `/opt/gvm/`
 - Scripts de Cron actualizados para nueva ruta base
-- Maintenance script actualizado con nuevos paths
 - Reports scripts adaptados para `/opt/gvm/`
 - Configuración adaptada para nueva estructura
 

@@ -98,60 +98,10 @@ def connect_gvm():
     return connection
 
 
-def verificar_mantenimiento_activo():
-    """
-    Verifica si hay un mantenimiento en curso consultando el archivo de lock.
-    
-    Returns:
-        tuple: (bool, str) - (True si hay mantenimiento activo, mensaje descriptivo)
-    """
-    lock_file = '/opt/gvm/.maintenance.lock'
-    
-    if not os.path.exists(lock_file):
-        return False, ""
-    
-    try:
-        with open(lock_file, 'r') as f:
-            lock_data = json.load(f)
-        
-        timestamp_str = lock_data.get('timestamp', '')
-        pid = lock_data.get('pid', 0)
-        
-        # Verificar si el proceso aún está corriendo
-        try:
-            os.kill(pid, 0)  # No mata el proceso, solo verifica si existe
-            # El proceso existe, el mantenimiento está activo
-            timestamp = datetime.datetime.fromisoformat(timestamp_str)
-            tiempo_transcurrido = datetime.datetime.now() - timestamp.replace(tzinfo=None)
-            horas = int(tiempo_transcurrido.total_seconds() / 3600)
-            minutos = int((tiempo_transcurrido.total_seconds() % 3600) / 60)
-            mensaje = f"Mantenimiento en curso desde {timestamp_str} ({horas}h {minutos}m)"
-            return True, mensaje
-        except OSError:
-            # El proceso no existe, el lock es obsoleto
-            # Eliminar el lock obsoleto
-            try:
-                os.remove(lock_file)
-            except Exception:
-                pass
-            return False, "Lock obsoleto eliminado"
-    except Exception as e:
-        # Si hay error al leer el lock, asumir que no está activo
-        return False, f"Error al leer lock: {e}"
-
-
 def start_task(connection, user, password, configuracion):
     informacion_tareas = []
     logfinal='/opt/gvm/tasksend.txt'
     tasklog='/opt/gvm/taskslog.txt'
-    
-    # Verificar si hay mantenimiento en curso antes de ejecutar tareas nuevas
-    mantenimiento_activo, mensaje = verificar_mantenimiento_activo()
-    if mantenimiento_activo:
-        write_log(f"MANTENIMIENTO EN CURSO: No se pueden ejecutar tareas nuevas. {mensaje}", tasklog)
-        print(f"⚠ MANTENIMIENTO EN CURSO: {mensaje}")
-        print("No se ejecutarán tareas nuevas hasta que el mantenimiento finalice.")
-        return 3  # Nuevo código de retorno para mantenimiento activo
     
     with Gmp(connection=connection) as gmp:
         gmp.authenticate(user,password)

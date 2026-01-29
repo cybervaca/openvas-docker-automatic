@@ -46,7 +46,6 @@ python3 run-task.py
 crontab -e
 # Añadir:
 */15 * * * * /opt/gvm/Cron/run_task.sh
-0 2 1 * * /opt/gvm/Cron/maintenance.sh
 ```
 
 ## Comandos Más Usados
@@ -83,21 +82,6 @@ python3 get-reports-test.py
 cd /opt/gvm/Targets_Tasks
 source /opt/gvm/gvm/bin/activate
 python3 delete-files.py
-```
-
-### Ejecutar Mantenimiento
-```bash
-cd /opt/gvm/Maintenance
-source /opt/gvm/gvm/bin/activate
-
-# Modo normal
-python3 maintenance.py
-
-# Modo simulación (ver qué haría sin hacer cambios)
-python3 maintenance.py --dry-run
-
-# Modo verbose (más detalles)
-python3 maintenance.py --verbose
 ```
 
 ## Formato del CSV de Targets
@@ -147,9 +131,6 @@ sudo -u gvm gvmd --get-scanners
 # ¿Está el socket disponible?
 ls -la /run/gvmd/gvmd.sock
 
-# ¿Hay mantenimiento activo?
-cat /opt/gvm/.maintenance.lock 2>/dev/null && echo "Mantenimiento activo" || echo "Sin mantenimiento"
-
 # Ver logs recientes
 tail -f /opt/gvm/taskslog.txt
 ```
@@ -174,15 +155,6 @@ sudo systemctl status gvmd ospd-openvas
 ```bash
 # Verificar que exista la configuración "Full and Fast"
 sudo -u gvm gvmd --get-configs | grep -i "full"
-```
-
-### Error: Lock de mantenimiento obsoleto
-```bash
-# Verificar si hay proceso corriendo
-ps aux | grep maintenance.py
-
-# Si no hay proceso, eliminar lock
-rm /opt/gvm/.maintenance.lock
 ```
 
 ### Tasks no se ejecutan automáticamente
@@ -231,9 +203,7 @@ chmod +x /opt/gvm/Cron/run_task.sh
 | `Targets_Tasks/set-tt.py` | **Script para crear targets/tasks** |
 | `Targets_Tasks/run-task.py` | **Script para ejecutar tasks** |
 | `Reports/get-reports-test.py` | Script para exportar reportes |
-| `Maintenance/maintenance.py` | Script de mantenimiento completo |
 | `taskslog.txt` | Log de ejecución de tasks |
-| `.maintenance.lock` | Indica mantenimiento en curso |
 
 ## Diferencias con Proyecto Original
 
@@ -265,4 +235,5 @@ Para más detalles, ver `DIFERENCIAS.md`.
 - [ ] Primera ejecución manual exitosa (`run-task.py`)
 
 ¡Listo para escanear! 🚀
+
 

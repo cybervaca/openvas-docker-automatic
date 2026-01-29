@@ -144,3 +144,4 @@ if __name__ == '__main__':
     subprocess.run(["python3", "/opt/gvm/Targets_Tasks/delete-files.py"])
     #email(logbalbix, configuracion)
 
+
