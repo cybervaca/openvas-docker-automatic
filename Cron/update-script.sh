@@ -5,6 +5,7 @@ SCRIPT_PATH="/opt/gvm/Update/update-script.py"
 
 source "$VIRTUAL_ENV/bin/activate"
 python3 "$SCRIPT_PATH"
-rm "/opt/gvm/tasksend.txt"
+rm -f "/opt/gvm/tasksend.txt"
 deactivate
+
 
