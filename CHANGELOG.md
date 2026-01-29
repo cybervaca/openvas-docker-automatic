@@ -1,5 +1,20 @@
 # Changelog
 
+## [2.3.0] - 2026-01-29
+
+### Simplificado
+- `Update/update-script.py` - Simplificado a un git pull básico
+  - Eliminada lógica compleja de backup/restore de targets
+  - Eliminada descarga de export-target.py
+  - Eliminado git pull forzado
+  - Eliminada verificación de versiones
+  - Ahora solo hace `git fetch` y `git pull origin main`
+  - Más simple, predecible y seguro
+
+### Actualizado
+- `Update/README.md` - Documentación actualizada para reflejar la simplificación
+- `README.md` - Descripción de scripts Cron actualizada
+
 ## [2.2.0] - 2026-01-29
 
 ### Eliminado

@@ -202,8 +202,7 @@ Scripts para automatización:
 
 - `run_task.sh` - Wrapper para ejecutar `run-task.py`
 - `actualiza_gvm.sh` - Actualiza feeds de GVM manualmente
-- `cron-update.sh` - Actualiza versiones de componentes
-- `update-script.sh` - Script de actualización general
+- `update-script.sh` - Actualiza el repositorio desde GitHub (git pull)
 - `procesos.sh` - Monitor de procesos (útil para debugging)
 
 ## Flujo de Trabajo
