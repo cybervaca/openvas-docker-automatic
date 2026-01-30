@@ -30,6 +30,10 @@ def load_csv(file):
             print("ERROR: No hay filas válidas después de filtrar")
             return None
         print(f"Columnas encontradas: {list(df.columns)}")
+        
+        # Resolver títulos duplicados
+        df = resolve_duplicate_titles(df)
+        
         return df
     except FileNotFoundError:
         print(f"ERROR: No se encontró el archivo {file}")
@@ -37,6 +41,56 @@ def load_csv(file):
     except Exception as e:
         print(f"ERROR al leer el CSV: {e}")
         return None
+
+
+def resolve_duplicate_titles(df):
+    """
+    Detecta títulos duplicados en el CSV y les agrega un sufijo numérico (_2, _3, etc.)
+    También actualiza la descripción para reflejar el nuevo título.
+    
+    Args:
+        df: DataFrame con columnas Titulo, Rango, Desc
+    
+    Returns:
+        DataFrame con títulos únicos
+    """
+    print("\n[PARSEO] Verificando títulos duplicados...")
+    
+    # Contador para cada título
+    title_counts = {}
+    new_titles = []
+    new_descs = []
+    duplicates_found = 0
+    
+    for index, row in df.iterrows():
+        titulo = str(row['Titulo']).strip()
+        desc = str(row['Desc']).strip()
+        
+        if titulo in title_counts:
+            # Es un duplicado, agregar sufijo
+            title_counts[titulo] += 1
+            new_titulo = f"{titulo}_{title_counts[titulo]}"
+            new_desc = f"{desc}_{title_counts[titulo]}"
+            new_titles.append(new_titulo)
+            new_descs.append(new_desc)
+            duplicates_found += 1
+            print(f"  ⚠ Duplicado detectado: '{titulo}' → '{new_titulo}'")
+        else:
+            # Primera aparición, no modificar
+            title_counts[titulo] = 1
+            new_titles.append(titulo)
+            new_descs.append(desc)
+    
+    # Actualizar el DataFrame
+    df['Titulo'] = new_titles
+    df['Desc'] = new_descs
+    
+    if duplicates_found > 0:
+        print(f"\n[PARSEO] ✓ {duplicates_found} título(s) duplicado(s) renombrado(s)")
+    else:
+        print(f"[PARSEO] ✓ No se encontraron títulos duplicados")
+    
+    return df
 
 def get_pass():
     password=getpass.getpass(prompt='Enter password: ')

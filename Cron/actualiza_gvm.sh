@@ -7,3 +7,4 @@ sudo -u gvm greenbone-feed-sync --type CERT
 
 
 
+

@@ -1,5 +1,21 @@
 # Changelog
 
+## [2.4.0] - 2026-01-30
+
+### Añadido
+- `Targets_Tasks/set-tt.py` - Detección y resolución automática de títulos duplicados
+  - Nueva función `resolve_duplicate_titles()` que parsea el CSV antes de crear targets
+  - Agrega sufijos numéricos automáticamente (_2, _3, etc.) a títulos duplicados
+  - Actualiza también la descripción para reflejar el nuevo título
+  - Muestra mensajes informativos de los cambios realizados
+  - Previene errores al intentar crear targets con el mismo nombre
+
+### Mejorado
+- `Targets_Tasks/set-tt.py` - Mejor manejo de títulos duplicados en openvas.csv
+  - Ejemplo: `PR_Servidores` duplicado se convierte en `PR_Servidores_2`, `PR_Servidores_3`, etc.
+  - El parseo se ejecuta automáticamente al cargar el CSV
+  - No requiere intervención manual del usuario
+
 ## [2.3.0] - 2026-01-29
 
 ### Simplificado
