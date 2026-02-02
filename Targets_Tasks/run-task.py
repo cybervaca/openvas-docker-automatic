@@ -23,6 +23,47 @@ def leer_configuracion():
     except Exception as e:
         print(f"Ocurrió un error: {e}")
 
+def leer_contador_interrupciones():
+    """Lee el archivo JSON con el contador de interrupciones de cada tarea"""
+    contador_file = '/opt/gvm/Config/task_interruptions.json'
+    try:
+        if os.path.exists(contador_file):
+            with open(contador_file, 'r') as archivo:
+                return json.load(archivo)
+        else:
+            return {}
+    except Exception as e:
+        print(f"Error al leer el contador de interrupciones: {e}")
+        return {}
+
+def guardar_contador_interrupciones(contador):
+    """Guarda el contador de interrupciones en el archivo JSON"""
+    contador_file = '/opt/gvm/Config/task_interruptions.json'
+    try:
+        with open(contador_file, 'w') as archivo:
+            json.dump(contador, archivo, indent=4)
+    except Exception as e:
+        print(f"Error al guardar el contador de interrupciones: {e}")
+
+def incrementar_contador_tarea(task_id, task_name):
+    """Incrementa el contador de interrupciones de una tarea específica"""
+    contador = leer_contador_interrupciones()
+    if task_id not in contador:
+        contador[task_id] = {
+            'name': task_name,
+            'interruptions': 0
+        }
+    contador[task_id]['interruptions'] += 1
+    guardar_contador_interrupciones(contador)
+    return contador[task_id]['interruptions']
+
+def resetear_contador_tarea(task_id):
+    """Resetea el contador de interrupciones cuando una tarea finaliza correctamente"""
+    contador = leer_contador_interrupciones()
+    if task_id in contador:
+        del contador[task_id]
+        guardar_contador_interrupciones(contador)
+
 def get_pass():
     password = getpass.getpass(prompt="Enter password: ")
     return password
@@ -102,9 +143,47 @@ def start_task(connection, user, password, configuracion):
     informacion_tareas = []
     logfinal='/opt/gvm/tasksend.txt'
     tasklog='/opt/gvm/taskslog.txt'
+    MAX_INTERRUPCIONES = 3
     
     with Gmp(connection=connection) as gmp:
         gmp.authenticate(user,password)
+        
+        # NUEVO: Verificar si hay tareas interrumpidas
+        respuesta_interrupted = gmp.get_tasks(filter_string='status="Stopped" status="Interrupted"')
+        root_interrupted = ET.fromstring(respuesta_interrupted)
+        
+        for task_elem in root_interrupted.findall(".//task"):
+            task_id = task_elem.get("id")
+            name = task_elem.findtext("name")
+            status = task_elem.findtext("status")
+            
+            if status in ['Stopped', 'Interrupted']:
+                # Incrementar el contador de interrupciones
+                num_interrupciones = incrementar_contador_tarea(task_id, name)
+                write_log(f"Tarea interrumpida detectada: {name} (ID: {task_id}). Interrupciones: {num_interrupciones}/{MAX_INTERRUPCIONES}", tasklog)
+                
+                if num_interrupciones >= MAX_INTERRUPCIONES:
+                    write_log(f"La tarea {name} ha alcanzado el límite de {MAX_INTERRUPCIONES} interrupciones. Se omite.", tasklog)
+                    # Marcar la tarea como omitida (opcional: podrías agregar un estado especial)
+                    continue
+                else:
+                    # Eliminar el último reporte para dejar la tarea en estado New
+                    write_log(f"Eliminando reporte de la tarea {name} para resetearla a estado New...", tasklog)
+                    try:
+                        # Obtener el último reporte de la tarea
+                        current_report_elem = task_elem.find(".//last_report/report")
+                        if current_report_elem is not None:
+                            report_id = current_report_elem.get("id")
+                            # Eliminar el reporte
+                            delete_response = gmp.delete_report(report_id)
+                            write_log(f"Reporte {report_id} eliminado. Respuesta: {delete_response}", tasklog)
+                            write_log(f"Tarea {name} reseteada a estado New. Será relanzada en la próxima ejecución.", tasklog)
+                        else:
+                            write_log(f"No se encontró reporte para la tarea {name}", tasklog)
+                    except Exception as e:
+                        write_log(f"Error al eliminar el reporte de la tarea {name}: {e}", tasklog)
+        
+        # Verificar tareas en ejecución
         respuesta = gmp.get_tasks(filter_string='status="Running" status="Requested" status="Queued"')
         root = ET.fromstring(respuesta)
         for task_elem in root.findall(".//task"):
@@ -116,11 +195,19 @@ def start_task(connection, user, password, configuracion):
                 return 1
         respuesta = gmp.get_tasks(filter_string='status="New"')
         root = ET.fromstring(respuesta)
+        contador = leer_contador_interrupciones()
+        
         for task_elem in root.findall(".//task"):
             task_id = task_elem.get("id")
             name = task_elem.findtext("name")
             status = task_elem.findtext("status")
+            
             if(status=='New'):
+                # Verificar si esta tarea ha sido interrumpida demasiadas veces
+                if task_id in contador and contador[task_id]['interruptions'] >= MAX_INTERRUPCIONES:
+                    write_log(f"Omitiendo tarea {name} (ID: {task_id}) - ha sido interrumpida {contador[task_id]['interruptions']} veces", tasklog)
+                    continue  # Saltar a la siguiente tarea
+                
                 write_log("Arrancamos la tarea {0} con id {1}".format(name,task_id),tasklog)
                 starttask=gmp.start_task(task_id)
                 write_log(starttask, tasklog)
@@ -132,6 +219,11 @@ def start_task(connection, user, password, configuracion):
             name = task_elem.findtext("name")
             status = task_elem.findtext("status")
             current_report_elem = task_elem.find(".//last_report/report")
+            
+            # Si la tarea finalizó correctamente (Done), resetear su contador
+            if status == 'Done':
+                resetear_contador_tarea(task_id)
+            
             if current_report_elem is not None:
                 report_id = current_report_elem.get("id")
                 timestamp = current_report_elem.findtext("timestamp")
