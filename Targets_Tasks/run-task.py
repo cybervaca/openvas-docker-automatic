@@ -167,19 +167,24 @@ def start_task(connection, user, password, configuracion):
                     # Marcar la tarea como omitida (opcional: podrías agregar un estado especial)
                     continue
                 else:
-                    # Eliminar el último reporte para dejar la tarea en estado New
-                    write_log(f"Eliminando reporte de la tarea {name} para resetearla a estado New...", tasklog)
+                    # Eliminar todos los reportes de la tarea para dejarla en estado New
+                    write_log(f"Buscando reportes de la tarea {name} para resetearla a estado New...", tasklog)
                     try:
-                        # Obtener el último reporte de la tarea
-                        current_report_elem = task_elem.find(".//last_report/report")
-                        if current_report_elem is not None:
-                            report_id = current_report_elem.get("id")
-                            # Eliminar el reporte
-                            delete_response = gmp.delete_report(report_id)
-                            write_log(f"Reporte {report_id} eliminado. Respuesta: {delete_response}", tasklog)
+                        # Obtener todos los reportes asociados a esta tarea
+                        reports_response = gmp.get_reports(filter_string=f'task_id={task_id}')
+                        reports_root = ET.fromstring(reports_response)
+                        reports = reports_root.findall(".//report")
+                        
+                        if reports:
+                            write_log(f"Se encontraron {len(reports)} reporte(s) para la tarea {name}", tasklog)
+                            for report in reports:
+                                report_id = report.get("id")
+                                # Eliminar el reporte
+                                delete_response = gmp.delete_report(report_id)
+                                write_log(f"Reporte {report_id} eliminado. Respuesta: {delete_response}", tasklog)
                             write_log(f"Tarea {name} reseteada a estado New. Será relanzada en la próxima ejecución.", tasklog)
                         else:
-                            write_log(f"No se encontró reporte para la tarea {name}", tasklog)
+                            write_log(f"No se encontraron reportes para la tarea {name}. Puede que ya esté en estado New.", tasklog)
                     except Exception as e:
                         write_log(f"Error al eliminar el reporte de la tarea {name}: {e}", tasklog)
         
