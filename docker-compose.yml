@@ -1,20 +1,67 @@
-version: '3.9'
+version: "3.9"
 
 services:
   openvas:
     image: immauss/openvas:latest
     container_name: openvas
     restart: unless-stopped
+
+    # Limites de memoria (anti-OOM)
+    mem_limit: 10g
+    mem_reservation: 8g
+
+    # Evita que se coma toda la CPU si entra en bucle
+    cpus: "2.0"
+
     ports:
       - "127.0.0.1:9392:9392"   # Web UI solo localhost
-      - "127.0.0.1:9390:9390"   # El puerto de comunicacion
+      - "127.0.0.1:9390:9390"   # Comunicacion interna
+
     volumes:
       - openvas-data:/data
       - /opt/gvm:/opt/gvm
+
     environment:
       - PASSWORD=admin
       - RELAYHOST=smtp.example.com
       - SMTPPORT=25
+      - TZ=UTC
+
+    # Autoheal solo reinicia contenedores con esta label
+    labels:
+      - autoheal=true
+
+    # Healthcheck real: valida procesos clave + web
+    # (usa curl si existe, si no usa wget; si no hay ninguno, falla)
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pgrep -x gvmd >/dev/null \
+           && pgrep -f ospd-openvas >/dev/null \
+           && pgrep -x redis-server >/dev/null \
+           && pgrep -x postgres >/dev/null \
+           && ( (command -v curl >/dev/null && curl -fsS http://127.0.0.1:9392 >/dev/null) \
+                || (command -v wget >/dev/null && wget -qO- http://127.0.0.1:9392 >/dev/null) )"
+        ]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 180s
+
+    # Prioridad baja para el OOM killer
+    oom_score_adj: -500
+
+  autoheal:
+    image: willfarrell/autoheal
+    container_name: autoheal
+    restart: unless-stopped
+    environment:
+      - AUTOHEAL_INTERVAL=30
+      - AUTOHEAL_START_PERIOD=120
+      - AUTOHEAL_ONLY_LABEL=true
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
 
 volumes:
   openvas-data:

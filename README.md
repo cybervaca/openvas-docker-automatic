@@ -37,6 +37,12 @@ cp config_example.json config.json
 
 **Ver documentación completa**: [DOCKER.md](DOCKER.md)
 
+**Características de resiliencia incluidas:**
+- ✅ Healthcheck automático que verifica procesos críticos y disponibilidad web
+- ✅ Auto-recuperación mediante contenedor autoheal que reinicia servicios caídos
+- ✅ Límites de recursos (memoria y CPU) para prevenir OOM y consumo excesivo
+- ✅ Protección OOM para reducir la probabilidad de que el kernel mate el proceso
+
 ### Opción 2: Instalación Nativa
 
 ## Instalación Nativa

@@ -9,23 +9,58 @@ El archivo `docker-compose.yml` está configurado para desplegar OpenVAS usando 
 ### Configuración
 
 ```yaml
-version: '3.9'
+version: "3.9"
 
 services:
   openvas:
     image: immauss/openvas:latest
     container_name: openvas
     restart: unless-stopped
+    
+    # Límites de recursos (anti-OOM)
+    mem_limit: 10g
+    mem_reservation: 8g
+    cpus: "2.0"
+    
     ports:
       - "127.0.0.1:9392:9392"   # Web UI solo localhost
       - "127.0.0.1:9390:9390"   # Puerto de comunicación GMP/TLS
+    
     volumes:
       - openvas-data:/data
       - /opt/gvm:/opt/gvm
+    
     environment:
       - PASSWORD=admin
       - RELAYHOST=smtp.example.com
       - SMTPPORT=25
+      - TZ=UTC
+    
+    # Autoheal solo reinicia contenedores con esta label
+    labels:
+      - autoheal=true
+    
+    # Healthcheck: verifica procesos críticos + web
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -x gvmd >/dev/null && pgrep -f ospd-openvas >/dev/null && pgrep -x redis-server >/dev/null && pgrep -x postgres >/dev/null && ( (command -v curl >/dev/null && curl -fsS http://127.0.0.1:9392 >/dev/null) || (command -v wget >/dev/null && wget -qO- http://127.0.0.1:9392 >/dev/null) )"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 180s
+    
+    # Prioridad baja para el OOM killer
+    oom_score_adj: -500
+
+  autoheal:
+    image: willfarrell/autoheal
+    container_name: autoheal
+    restart: unless-stopped
+    environment:
+      - AUTOHEAL_INTERVAL=30
+      - AUTOHEAL_START_PERIOD=120
+      - AUTOHEAL_ONLY_LABEL=true
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
 
 volumes:
   openvas-data:
@@ -59,6 +94,17 @@ volumes:
 - **PASSWORD**: Contraseña del usuario `admin` de OpenVAS (por defecto: `admin`)
 - **RELAYHOST**: Servidor SMTP para envío de notificaciones por correo
 - **SMTPPORT**: Puerto del servidor SMTP (por defecto: `25`)
+- **TZ**: Zona horaria del contenedor (por defecto: `UTC`)
+
+#### Sistema de Auto-Recuperación
+
+El docker-compose incluye:
+- **Healthcheck**: Verifica procesos críticos y disponibilidad web cada 60 segundos
+- **Autoheal**: Reinicia automáticamente contenedores unhealthy
+- **Límites de recursos**: Previene OOM y consumo excesivo de CPU
+- **Protección OOM**: Reduce la probabilidad de que el kernel mate el proceso
+
+Ver sección [Sistema de Auto-Recuperación](#sistema-de-auto-recuperación) para más detalles.
 
 ## Uso
 
@@ -230,6 +276,96 @@ server {
 }
 ```
 
+## Sistema de Auto-Recuperación
+
+El docker-compose incluye un sistema robusto de monitoreo y recuperación automática para prevenir y resolver caídas de servicios.
+
+### Healthcheck
+
+El contenedor OpenVAS incluye un healthcheck que verifica periódicamente:
+
+1. **Procesos críticos** (cada 60 segundos):
+   - `gvmd` (Greenbone Vulnerability Manager)
+   - `ospd-openvas` (OpenVAS Scanner Protocol daemon)
+   - `redis-server` (Cache y colas)
+   - `postgres` (Base de datos)
+
+2. **Disponibilidad web**:
+   - Verifica que la interfaz web responda en el puerto 9392
+   - Usa `curl` si está disponible, o `wget` como alternativa
+
+**Configuración del healthcheck:**
+- **Intervalo**: 60 segundos
+- **Timeout**: 10 segundos por verificación
+- **Reintentos**: 3 fallos consecutivos marcan el contenedor como `unhealthy`
+- **Periodo de inicio**: 180 segundos (da tiempo para la inicialización completa)
+
+### Autoheal
+
+El servicio `autoheal` monitorea automáticamente los contenedores con la etiqueta `autoheal=true` y los reinicia cuando detecta que están `unhealthy`.
+
+**Características:**
+- **Intervalo de verificación**: 30 segundos
+- **Periodo de inicio**: 120 segundos (espera antes de monitorear contenedores nuevos)
+- **Solo etiquetados**: Solo actúa sobre contenedores con `autoheal=true` (seguridad)
+- **Acceso read-only**: Solo lectura al socket de Docker
+
+**Cómo funciona:**
+1. Autoheal verifica cada 30 segundos el estado de salud de los contenedores
+2. Si detecta un contenedor `unhealthy` (después de 3 fallos del healthcheck)
+3. Reinicia automáticamente el contenedor
+4. Registra la acción en sus logs
+
+### Límites de Recursos
+
+Para prevenir problemas de OOM (Out of Memory) y consumo excesivo de recursos:
+
+- **Memoria máxima**: 10GB (`mem_limit: 10g`)
+- **Memoria reservada**: 8GB (`mem_reservation: 8g`)
+- **CPU**: Limitado a 2 cores (`cpus: "2.0"`)
+- **Protección OOM**: `oom_score_adj: -500` (reduce la probabilidad de que el kernel mate el proceso)
+
+### Verificar el Estado de Salud
+
+```bash
+# Ver el estado de salud del contenedor
+docker inspect openvas --format='{{.State.Health.Status}}'
+
+# Ver detalles completos del healthcheck
+docker inspect openvas --format='{{json .State.Health}}' | jq
+
+# Ver logs del healthcheck
+docker inspect openvas --format='{{range .State.Health.Log}}{{.Output}}{{end}}'
+```
+
+### Ver Logs de Autoheal
+
+```bash
+# Ver logs del contenedor autoheal
+docker logs autoheal
+
+# Seguir logs en tiempo real
+docker logs -f autoheal
+```
+
+### Ejemplo de Salida del Healthcheck
+
+```bash
+$ docker inspect openvas --format='{{json .State.Health}}' | jq
+{
+  "Status": "healthy",
+  "FailingStreak": 0,
+  "Log": [
+    {
+      "Start": "2026-02-02T10:00:00.000000000Z",
+      "End": "2026-02-02T10:00:10.123456789Z",
+      "ExitCode": 0,
+      "Output": ""
+    }
+  ]
+}
+```
+
 ## Mantenimiento del Contenedor
 
 ### Actualizar imagen de OpenVAS
@@ -312,20 +448,105 @@ OpenVAS requiere recursos significativos:
 - **CPU**: Mínimo 2 cores, recomendado 4+
 - **Disco**: Mínimo 20GB para feeds y reportes
 
-Si tienes problemas de recursos:
+Los límites están configurados en `docker-compose.yml`:
+- Memoria máxima: 10GB
+- Memoria reservada: 8GB
+- CPU: 2 cores
+
+Si necesitas ajustar los límites, edita `docker-compose.yml` y reinicia:
 
 ```bash
-# Limitar memoria del contenedor (docker-compose.yml)
+docker-compose down
+docker-compose up -d
+```
+
+### Verificar el estado del healthcheck
+
+Si el contenedor se reinicia constantemente, verifica el estado del healthcheck:
+
+```bash
+# Ver el estado actual
+docker inspect openvas --format='{{.State.Health.Status}}'
+
+# Ver el historial de verificaciones
+docker inspect openvas --format='{{range .State.Health.Log}}{{println .Output}}{{end}}'
+
+# Ver qué proceso está fallando
+docker exec -it openvas ps aux | grep -E "gvmd|ospd|redis|postgres"
+```
+
+**Estados posibles:**
+- `healthy`: Todos los servicios funcionan correctamente
+- `unhealthy`: El healthcheck falló 3 veces consecutivas
+- `starting`: El contenedor está en el período de inicio (primeros 180 segundos)
+
+### Autoheal reinicia constantemente el contenedor
+
+Si autoheal reinicia el contenedor repetidamente, puede indicar un problema más profundo:
+
+1. **Verificar logs del contenedor**:
+   ```bash
+   docker logs --tail 100 openvas
+   ```
+
+2. **Verificar logs de autoheal**:
+   ```bash
+   docker logs autoheal
+   ```
+
+3. **Verificar recursos del sistema**:
+   ```bash
+   # Ver uso de recursos en tiempo real
+   docker stats openvas
+   
+   # Verificar memoria disponible en el host
+   free -h
+   ```
+
+4. **Verificar qué servicio está fallando**:
+   ```bash
+   # Verificar procesos dentro del contenedor
+   docker exec -it openvas ps aux
+   
+   # Verificar logs de servicios específicos
+   docker exec -it openvas tail -f /var/log/gvm/gvmd.log
+   docker exec -it openvas tail -f /var/log/gvm/ospd-openvas.log
+   ```
+
+5. **Deshabilitar temporalmente autoheal** (para debugging):
+   ```bash
+   # Detener autoheal
+   docker stop autoheal
+   
+   # Reiniciar openvas manualmente
+   docker restart openvas
+   
+   # Monitorear manualmente
+   docker logs -f openvas
+   ```
+
+### Ajustar límites de recursos según necesidades
+
+Si tu servidor tiene más o menos recursos, puedes ajustar los límites en `docker-compose.yml`:
+
+```yaml
 services:
   openvas:
-    # ... otras configuraciones
-    deploy:
-      resources:
-        limits:
-          memory: 8G
-        reservations:
-          memory: 4G
+    # Para servidores con más recursos
+    mem_limit: 16g
+    mem_reservation: 12g
+    cpus: "4.0"
+    
+    # Para servidores con menos recursos
+    # mem_limit: 8g
+    # mem_reservation: 6g
+    # cpus: "1.5"
 ```
+
+**Recomendaciones:**
+- **Mínimo**: 8GB RAM, 2 CPUs
+- **Recomendado**: 16GB RAM, 4 CPUs
+- **Producción**: 32GB+ RAM, 8+ CPUs
 
 ## Diferencias con Instalación Nativa
 
