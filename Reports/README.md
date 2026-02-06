@@ -123,7 +123,7 @@ Reports/
 
 ## 🔧 Configuración
 
-Todos los scripts requieren el archivo de configuración `/home/redteam/gvm/Config/config.json` con la siguiente estructura:
+Todos los scripts requieren el archivo de configuración `/opt/gvm/Config/config.json` con la siguiente estructura:
 
 ```json
 {
@@ -190,14 +190,14 @@ Los scripts pueden enviar notificaciones automáticas al completar la generació
 ## 🔒 Requisitos
 
 - Python 3.x
-- Acceso al socket de GVM (`/run/gvmd/gvmd.sock`)
+- Conexión TLS a GVM (puerto 9390)
 - Permisos para acceder a PostgreSQL (para scripts con información de SO)
 - Librerías Python (ver `requirements.txt` en el directorio raíz)
 
 ## ⚠️ Notas Importantes
 
-1. Los scripts deben ejecutarse dentro del contenedor Docker de OpenVAS o con acceso al socket de GVM
-2. La ruta `/home/redteam/gvm/` debe ajustarse según la instalación
+1. Los scripts se conectan a GVM mediante **TLS en el puerto 9390** (no Unix Socket)
+2. La ruta base es `/opt/gvm/` según la configuración actual del proyecto
 3. Los reportes se generan con filtros: `min_qod=70` y `severity>0`
 4. Los archivos temporales en `exports/` se limpian automáticamente en algunos scripts
 5. La subida a Balbix está desactivada por defecto en algunos scripts (comentada)
@@ -234,10 +234,11 @@ python3 upload-reports.py /home/redteam/gvm/Reports/exports/vulns_host/2024_02_0
 
 ## 🐛 Troubleshooting
 
-- **Error de conexión a GVM**: Verificar que el socket `/run/gvmd/gvmd.sock` esté accesible
+- **Error de conexión a GVM**: Verificar que el servicio GVM esté escuchando en el puerto 9390 (TLS)
 - **Error de PostgreSQL**: Verificar permisos del usuario postgres
-- **Error de configuración**: Verificar que `config.json` exista y tenga el formato correcto
+- **Error de configuración**: Verificar que `/opt/gvm/Config/config.json` exista y tenga el formato correcto
 - **Archivos no generados**: Verificar que existan reportes en OpenVAS con vulnerabilidades
+- **Error de certificado TLS**: Asegurarse de que los certificados de GVM estén correctamente configurados
 
 ## 📄 Licencia
 

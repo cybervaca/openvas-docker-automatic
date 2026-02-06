@@ -1,7 +1,7 @@
 import pandas as pd
 import getpass
 import xml.etree.ElementTree as ET
-from gvm.connections import UnixSocketConnection
+from gvm.connections import TLSConnection
 from gvm.protocols.gmp import Gmp
 from gvm.xml import pretty_print
 import untangle
@@ -25,7 +25,7 @@ parser.add_argument("name", type=str, help="Pasa el ID de la task o el nombre co
 # Función para leer la configuración
 def leer_configuracion():
     try:
-        with open('/home/redteam/gvm/Config/config.json', 'r') as archivo:
+        with open('/opt/gvm/Config/config.json', 'r') as archivo:
             configuracion = json.load(archivo)
             return configuracion
     except FileNotFoundError:
@@ -85,13 +85,13 @@ def get_pass():
 
 # Función para conectarse a GVM
 def connect_gvm():
-    path = "/run/gvmd/gvmd.sock"
-    connection = UnixSocketConnection(path=path, timeout=600)
+    # Conexión TLS a GVM
+    connection = TLSConnection(hostname="127.0.0.1", port=9390)
     return connection
 
 # Función para preparar el reporte
 def ready_report(connection, user, password, reportformat, host, reporte):
-    export = "/home/redteam/gvm/Reports/exports"
+    export = "/opt/gvm/Reports/exports"
     files = []
     with Gmp(connection=connection) as gmp:
         response = gmp.get_version()
@@ -176,7 +176,7 @@ def delete_duplicates(files, export, host):
     file_unif = vulns_ip(nombre_archivo, host)
     #solo para la externa
     #print("Lanzamos subida a balbix")
-    #subprocess.run(["python3", "/home/redteam/gvm/Reports/upload-reports.py"] + [file_unif])
+    #subprocess.run(["python3", "/opt/gvm/Reports/upload-reports.py"] + [file_unif])
     #fin externa
     separar_cve(file_unif)
 
@@ -190,7 +190,7 @@ def separar_cve(nombre_archivo):
         sin_info.to_csv(nombre_archivo.replace('.csv', '_Misconfigs.csv'), index=False)
         ficheros = [nombre_archivo.replace('.csv', '_CVE.csv'), nombre_archivo.replace('.csv', '_Misconfigs.csv')]
         #print("Ya no sube a Balbix, se mantiene para la subida a Valbix")
-        #subprocess.run(["python3", "/home/redteam/gvm/Reports/upload-reports.py"] + ficheros)
+        #subprocess.run(["python3", "/opt/gvm/Reports/upload-reports.py"] + ficheros)
     except pd.errors.ParserError as pe:
         print(f"Error de análisis al procesar el archivo CSV: {pe}")
     except Exception as e:
@@ -264,7 +264,7 @@ def determinar_severidad(cvss):
         return 'Info'
 
 def vulns_ip(vulns, host):
-    export = '/home/redteam/gvm/Reports/exports/vulns_host'
+    export = '/opt/gvm/Reports/exports/vulns_host'
     now = datetime.datetime.now()
     year = now.year
     month = now.month
@@ -276,7 +276,7 @@ def vulns_ip(vulns, host):
     df_ips = pd.read_csv(vulns)
     df_sistemas = pd.read_csv(host)
     sistemas_operativos = []
-    #rangos_ip = cargar_rangos_ip('/home/redteam/gvm/Targets_Tasks/openvas_externa.csv')  # Cambia esta ruta al archivo CSV con los rangos de IP y países
+    #rangos_ip = cargar_rangos_ip('/opt/gvm/Targets_Tasks/openvas_externa.csv')  # Cambia esta ruta al archivo CSV con los rangos de IP y países
     paises = []
     severidades = []
     regiones = []
@@ -326,7 +326,7 @@ def vulns_ip(vulns, host):
 
 if __name__ == "__main__":
     args = parser.parse_args()
-    dir_csv = '/home/redteam/gvm/Reports/exports/'
+    dir_csv = '/opt/gvm/Reports/exports/'
     csv_files = glob.glob(os.path.join(dir_csv, '*.csv'))
     for csv_file in csv_files:
         try:
@@ -335,7 +335,7 @@ if __name__ == "__main__":
         except OSError as e:
             print(f'Error al borrar el archivo {csv_file}: {e.strerror}')
     origen = '/tmp/hosts.csv'
-    destino = '/home/redteam/gvm/Reports/hosts.csv'
+    destino = '/opt/gvm/Reports/hosts.csv'
     configuracion = leer_configuracion()
     username = configuracion.get('user')
     password = configuracion.get('password')
@@ -343,5 +343,5 @@ if __name__ == "__main__":
     get_hosts(origen, destino)
     reportformat = get_reportformat(connection, username, password)
     ready_report(connection, username, password, reportformat, destino, args.name)
-    print("Finalizado, informe en /home/redteam/gvm/Reports/exports/exports/vulns_host")
+    print("Finalizado, informe en /opt/gvm/Reports/exports/exports/vulns_host")
     #email(configuracion)

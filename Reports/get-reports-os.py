@@ -1,7 +1,7 @@
 import pandas as pd
 import getpass
 import xml.etree.ElementTree as ET
-from gvm.connections import UnixSocketConnection
+from gvm.connections import TLSConnection
 from gvm.protocols.gmp import Gmp
 from gvm.xml import pretty_print
 import untangle
@@ -19,7 +19,7 @@ from email import encoders
 
 def leer_configuracion():
     try:
-        with open('/home/redteam/gvm/Config/config.json', 'r') as archivo:
+        with open('/opt/gvm/Config/config.json', 'r') as archivo:
             configuracion = json.load(archivo)
             return configuracion
     except FileNotFoundError:
@@ -58,14 +58,13 @@ def get_pass():
 
 
 def connect_gvm():
-    # path to unix socket
-    path = "/run/gvmd/gvmd.sock"
-    connection = UnixSocketConnection(path=path, timeout=600)
+    # Conexión TLS a GVM
+    connection = TLSConnection(hostname="127.0.0.1", port=9390)
     return connection
 
 
 def ready_report(connection, user, password, reportformat,host):
-    export = "/home/redteam/gvm/Reports/exports"
+    export = "/opt/gvm/Reports/exports"
     files = []
     # using the with statement to automatically connect and disconnect to gvmd
     with Gmp(connection=connection) as gmp:
@@ -161,7 +160,7 @@ def separar_cve(nombre_archivo):
     sin_info.to_csv(nombre_archivo.replace('.csv', '_Misconfigs.csv'),index=False)
     ficheros=[nombre_archivo.replace('.csv', '_CVE.csv'), nombre_archivo.replace('.csv', '_Misconfigs.csv')]
     print("Lanzamos subida a balbix")
-    subprocess.run(["python3", "/home/redteam/gvm/Reports/upload-reports.py"] + ficheros)
+    subprocess.run(["python3", "/opt/gvm/Reports/upload-reports.py"] + ficheros)
 
 def get_reportformat(connection, username, password):
     with Gmp(connection=connection) as gmp:
@@ -194,7 +193,7 @@ def get_hosts(origen,destino):
     shutil.copyfile(origen,destino)
 
 def vulns_ip(vulns,host):
-    export = '/home/redteam/gvm/Reports/exports/vulns_host'
+    export = '/opt/gvm/Reports/exports/vulns_host'
     now = datetime.datetime.now()
     year = now.year
     month = now.month
@@ -219,7 +218,7 @@ def vulns_ip(vulns,host):
 
 if __name__ == "__main__":
     origen='/tmp/hosts.csv'
-    destino='/home/redteam/gvm/Reports/hosts.csv'
+    destino='/opt/gvm/Reports/hosts.csv'
     configuracion = leer_configuracion()
     username = configuracion.get('user')
     password = configuracion.get('password')
