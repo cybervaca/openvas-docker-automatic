@@ -1,3 +1,8 @@
+import warnings
+# Suprimir warnings de deprecación
+warnings.filterwarnings('ignore', category=DeprecationWarning)
+warnings.filterwarnings('ignore', category=UserWarning)
+
 import pandas as pd
 import getpass
 import xml.etree.ElementTree as ET

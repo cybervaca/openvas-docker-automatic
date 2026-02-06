@@ -1,3 +1,8 @@
+import warnings
+# Suprimir warnings de deprecación
+warnings.filterwarnings('ignore', category=DeprecationWarning)
+warnings.filterwarnings('ignore', category=UserWarning)
+
 import pandas as pd
 import getpass
 import xml.etree.ElementTree as ET
@@ -374,5 +379,5 @@ if __name__ == "__main__":
     get_hosts(origen, destino)
     reportformat = get_reportformat(connection, username, password)
     ready_report(connection, username, password, reportformat, destino, args.name)
-    print("Finalizado, informe en /opt/gvm/Reports/exports/exports/vulns_host")
+    print("Finalizado, informe en /opt/gvm/Reports/exports/vulns_host")
     #email(configuracion)
