@@ -688,9 +688,14 @@ def enviar_alertas(resultados, config):
     if tiene_problemas:
         # Verificar cooldown (usamos 'monitoring' como tipo único para el mensaje completo)
         puede_enviar = puede_enviar_alerta('monitoring', config)
-        escribir_log(f"Verificación de cooldown: puede_enviar={puede_enviar}, tiene_problemas={tiene_problemas}", 'DEBUG')
+        forzar_envio = monitoring_config.get('force_send', False)  # Opción para forzar envío
         
-        if puede_enviar:
+        escribir_log(f"Verificación de cooldown: puede_enviar={puede_enviar}, tiene_problemas={tiene_problemas}, forzar={forzar_envio}", 'DEBUG')
+        
+        if puede_enviar or forzar_envio:
+            if forzar_envio and not puede_enviar:
+                escribir_log("Forzando envío de alerta (ignorando cooldown)", 'WARNING')
+            
             mensaje = formatear_mensaje_alerta_completo(resultados, config, timestamp)
             escribir_log(f"Preparando envío de alerta (tamaño mensaje: {len(mensaje)} caracteres)", 'INFO')
             if enviar_telegram(mensaje, bot_token, chat_id, config_monitor):
@@ -706,7 +711,7 @@ def enviar_alertas(resultados, config):
                 tiempo_transcurrido = (datetime.datetime.now() - ultimo_envio).total_seconds()
                 cooldown_seconds = monitoring_config.get('alert_cooldown', 3600)
                 tiempo_restante = cooldown_seconds - tiempo_transcurrido
-                escribir_log(f"Cooldown activo. Tiempo restante: {int(tiempo_restante)} segundos", 'INFO')
+                escribir_log(f"Cooldown activo. Tiempo restante: {int(tiempo_restante)} segundos ({int(tiempo_restante/60)} minutos)", 'INFO')
             else:
                 escribir_log("No se puede enviar alerta (cooldown activo pero sin datos)", 'WARNING')
     else:
