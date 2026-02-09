@@ -226,6 +226,31 @@ def cerrar_tunel_ssh():
         finally:
             ssh_tunnel_process = None
 
+def dividir_mensaje(mensaje, max_length=4000):
+    """Divide un mensaje largo en partes más pequeñas"""
+    # Telegram tiene límite de 4096 caracteres, usamos 4000 para margen
+    if len(mensaje) <= max_length:
+        return [mensaje]
+    
+    partes = []
+    lineas = mensaje.split('\n')
+    parte_actual = ""
+    
+    for linea in lineas:
+        # Si añadir esta línea excede el límite, guardar parte actual y empezar nueva
+        if len(parte_actual) + len(linea) + 1 > max_length:
+            if parte_actual:
+                partes.append(parte_actual)
+            parte_actual = linea + '\n'
+        else:
+            parte_actual += linea + '\n'
+    
+    # Añadir la última parte
+    if parte_actual:
+        partes.append(parte_actual)
+    
+    return partes
+
 def enviar_telegram(mensaje, bot_token, chat_id, config_monitor=None):
     """Envía un mensaje por Telegram, usando túnel SOCKS si está configurado"""
     # Asegurar que chat_id sea string (puede venir como número del JSON)
@@ -253,38 +278,63 @@ def enviar_telegram(mensaje, bot_token, chat_id, config_monitor=None):
             }
             escribir_log(f"Usando proxy SOCKS {socks_host}:{socks_port} para Telegram", 'INFO')
     
-    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-    payload = {
-        'chat_id': chat_id,
-        'text': mensaje,
-        'parse_mode': 'HTML'
-    }
+    # Dividir mensaje si es muy largo
+    partes = dividir_mensaje(mensaje, max_length=4000)
+    total_partes = len(partes)
     
-    try:
-        response = requests.post(url, json=payload, proxies=proxies, timeout=30)
-        response.raise_for_status()
+    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+    
+    # Enviar cada parte
+    for i, parte in enumerate(partes):
+        # Añadir indicador de parte si hay múltiples partes
+        if total_partes > 1:
+            parte_con_numero = f"📄 <i>Parte {i+1}/{total_partes}</i>\n\n{parte}"
+        else:
+            parte_con_numero = parte
         
-        # Cerrar túnel después de enviar (bajo demanda)
-        if usar_proxy:
-            cerrar_tunel_ssh()
+        payload = {
+            'chat_id': chat_id,
+            'text': parte_con_numero,
+            'parse_mode': 'HTML'
+        }
         
-        return True
-    except requests.exceptions.HTTPError as e:
-        error_detail = ""
         try:
-            error_json = response.json()
-            error_detail = f" - {error_json.get('description', '')}"
-        except:
-            pass
-        escribir_log(f"Error HTTP al enviar mensaje a Telegram: {e}{error_detail}", 'ERROR')
-        if usar_proxy:
-            cerrar_tunel_ssh()
-        return False
-    except requests.exceptions.RequestException as e:
-        escribir_log(f"Error al enviar mensaje a Telegram: {e}", 'ERROR')
-        if usar_proxy:
-            cerrar_tunel_ssh()
-        return False
+            response = requests.post(url, json=payload, proxies=proxies, timeout=30)
+            response.raise_for_status()
+            
+            if total_partes > 1:
+                escribir_log(f"Mensaje parte {i+1}/{total_partes} enviada correctamente", 'INFO')
+            
+            # Pequeña pausa entre mensajes para evitar rate limiting
+            if i < total_partes - 1:
+                import time
+                time.sleep(0.5)
+                
+        except requests.exceptions.HTTPError as e:
+            error_detail = ""
+            try:
+                error_json = response.json()
+                error_detail = f" - {error_json.get('description', '')}"
+            except:
+                pass
+            escribir_log(f"Error HTTP al enviar mensaje parte {i+1}/{total_partes} a Telegram: {e}{error_detail}", 'ERROR')
+            if usar_proxy:
+                cerrar_tunel_ssh()
+            return False
+        except requests.exceptions.RequestException as e:
+            escribir_log(f"Error al enviar mensaje parte {i+1}/{total_partes} a Telegram: {e}", 'ERROR')
+            if usar_proxy:
+                cerrar_tunel_ssh()
+            return False
+    
+    # Cerrar túnel después de enviar todas las partes (bajo demanda)
+    if usar_proxy:
+        cerrar_tunel_ssh()
+    
+    if total_partes > 1:
+        escribir_log(f"Mensaje completo enviado en {total_partes} partes", 'INFO')
+    
+    return True
 
 def cargar_cooldown():
     """Carga el estado de cooldown de alertas"""
