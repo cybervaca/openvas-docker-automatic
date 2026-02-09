@@ -132,16 +132,21 @@ def crear_tunel_ssh_socks(config_monitor):
         '-o', 'StrictHostKeyChecking=no',  # No verificar host key (opcional, puede cambiarse)
         '-o', 'UserKnownHostsFile=/dev/null',
         '-o', 'LogLevel=ERROR',  # Reducir output
+        '-o', 'BatchMode=yes',  # No pedir contraseña
         '-f',  # Background
     ]
     
-    # Añadir clave SSH si está especificada
-    if ssh_key and os.path.exists(ssh_key):
-        ssh_cmd.extend(['-i', ssh_key])
-        # Asegurar permisos correctos de la clave
-        os.chmod(ssh_key, 0o600)
+    # Añadir clave SSH solo si está especificada y existe
+    # Si no se especifica, SSH usará la clave por defecto del usuario (normalmente ~/.ssh/id_rsa)
+    if ssh_key:
+        if os.path.exists(ssh_key):
+            ssh_cmd.extend(['-i', ssh_key])
+            # Asegurar permisos correctos de la clave
+            os.chmod(ssh_key, 0o600)
+        else:
+            escribir_log(f"Clave SSH especificada pero no encontrada en {ssh_key}, usando clave por defecto", 'WARNING')
     else:
-        escribir_log(f"Clave SSH no encontrada en {ssh_key}, usando clave por defecto", 'WARNING')
+        escribir_log("Usando clave SSH por defecto del usuario (desde ~/.ssh/)", 'INFO')
     
     ssh_cmd.append(f'{vps_user}@{vps_host}')
     

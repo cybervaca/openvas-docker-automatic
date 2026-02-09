@@ -4,7 +4,7 @@
         "vps_host": "tu-vps.ejemplo.com",
         "vps_port": 22,
         "vps_user": "usuario",
-        "ssh_key_path": "/opt/gvm/Monitor/.ssh/id_rsa",
+        "ssh_key_path": null,
         "socks_port": 1080,
         "socks_host": "127.0.0.1"
     }

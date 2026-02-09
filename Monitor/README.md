@@ -75,47 +75,39 @@ Antes de instalar el servicio, necesitas crear un bot de Telegram:
 
 Si Telegram está bloqueado por firewall corporativo, puedes usar un túnel SSH SOCKS a través de tu VPS:
 
-1. **Crear clave SSH** (si no la tienes):
-   ```bash
-   mkdir -p /opt/gvm/Monitor/.ssh
-   ssh-keygen -t rsa -b 4096 -f /opt/gvm/Monitor/.ssh/id_rsa -N ""
-   ```
+**Requisitos previos:**
+- Tu clave SSH pública debe estar en `~/.ssh/authorized_keys` del usuario en el VPS
+- El servicio se ejecuta como `root`, así que usará la clave SSH de root (`/root/.ssh/id_rsa`)
+- Asegúrate de que la clave pública de root esté en el `authorized_keys` del VPS
 
-2. **Copiar clave pública al VPS**:
-   ```bash
-   ssh-copy-id -i /opt/gvm/Monitor/.ssh/id_rsa.pub usuario@tu-vps.com
-   ```
-   
-   O manualmente:
-   ```bash
-   cat /opt/gvm/Monitor/.ssh/id_rsa.pub | ssh usuario@tu-vps.com "mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_keys"
-   ```
-
-3. **Crear configuración del túnel** en `/opt/gvm/Monitor/config.json`:
-   ```json
-   {
-       "ssh_tunnel": {
-           "enabled": true,
-           "vps_host": "tu-vps.ejemplo.com",
-           "vps_port": 22,
-           "vps_user": "usuario",
-           "ssh_key_path": "/opt/gvm/Monitor/.ssh/id_rsa",
-           "socks_port": 1080,
-           "socks_host": "127.0.0.1"
-       }
-   }
-   ```
+**Crear configuración del túnel** en `/opt/gvm/Monitor/config.json`:
+```json
+{
+    "ssh_tunnel": {
+        "enabled": true,
+        "vps_host": "tu-vps.ejemplo.com",
+        "vps_port": 22,
+        "vps_user": "usuario",
+        "ssh_key_path": null,
+        "socks_port": 1080,
+        "socks_host": "127.0.0.1"
+    }
+}
+```
 
 **Parámetros del túnel SSH:**
 - `enabled`: Habilitar túnel SSH SOCKS (true/false)
 - `vps_host`: IP o dominio de tu VPS
 - `vps_port`: Puerto SSH del VPS (normalmente 22)
 - `vps_user`: Usuario SSH en el VPS
-- `ssh_key_path`: Ruta a la clave SSH privada
+- `ssh_key_path`: Ruta a la clave SSH privada (opcional, si es `null` usa la clave por defecto del usuario)
 - `socks_port`: Puerto local para el proxy SOCKS (1080 por defecto)
 - `socks_host`: Host local para el proxy SOCKS (127.0.0.1 por defecto)
 
-**Nota:** El túnel se crea bajo demanda (solo cuando se necesita enviar una alerta) y se cierra automáticamente después.
+**Nota:** 
+- El túnel se crea bajo demanda (solo cuando se necesita enviar una alerta) y se cierra automáticamente después
+- Si `ssh_key_path` es `null` o no se especifica, se usará la clave SSH por defecto del usuario (normalmente `/root/.ssh/id_rsa`)
+- Asegúrate de que la clave pública esté en el `authorized_keys` del VPS antes de usar el servicio
 
 ### 3. Configurar config.json
 
