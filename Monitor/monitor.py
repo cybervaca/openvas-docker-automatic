@@ -766,13 +766,10 @@ def main():
         
         escribir_log(f"Verificación completada. Estado: {resultados['status']}")
         
-        # Exit code según el estado
-        if resultados['status'] == 'error':
-            sys.exit(1)
-        elif resultados['status'] == 'warning':
-            sys.exit(0)
-        else:
-            sys.exit(0)
+        # Siempre salir con código 0 (éxito) porque detectar problemas es la función normal del servicio
+        # El servicio solo debe fallar si hay errores en el propio script (configuración, permisos, etc.)
+        # No debe fallar por detectar que el contenedor está caído o hay problemas - eso es su trabajo
+        sys.exit(0)
     finally:
         # Asegurar que el túnel SSH se cierre al finalizar
         cerrar_tunel_ssh()
