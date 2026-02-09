@@ -156,27 +156,8 @@ def crear_tunel_ssh_socks(config_monitor):
     
     try:
         escribir_log(f"Creando túnel SSH SOCKS a {vps_user}@{vps_host}:{vps_port}", 'INFO')
-        escribir_log(f"Comando SSH: {' '.join(ssh_cmd)}", 'DEBUG')
         
-        # Primero probar conexión SSH sin el flag -f para ver errores
-        test_cmd = ssh_cmd.copy()
-        test_cmd.remove('-f')  # Quitar background para ver errores
-        test_cmd.extend(['-o', 'ConnectTimeout=5'])
-        test_cmd.append('echo "test"')  # Comando simple para probar
-        
-        test_process = subprocess.run(
-            test_cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            timeout=10
-        )
-        
-        if test_process.returncode != 0:
-            error_msg = test_process.stderr.decode('utf-8', errors='ignore')
-            escribir_log(f"Error al conectar con SSH: {error_msg}", 'ERROR')
-            return False
-        
-        # Si la prueba funciona, crear el túnel en background
+        # Crear el túnel en background
         process = subprocess.Popen(
             ssh_cmd,
             stdout=subprocess.PIPE,
@@ -209,8 +190,8 @@ def crear_tunel_ssh_socks(config_monitor):
                     ssh_tunnel_process = process
                     escribir_log(f"Túnel SSH SOCKS creado y escuchando en {socks_host}:{socks_port}", 'INFO')
                     return True
-            except Exception as e:
-                escribir_log(f"Error al verificar puerto SOCKS: {e}", 'DEBUG')
+            except Exception:
+                pass
         
         # Si llegamos aquí, el túnel no se estableció correctamente
         try:
