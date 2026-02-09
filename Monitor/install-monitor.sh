@@ -45,10 +45,17 @@ echo -e "${YELLOW}Creando directorio de destino...${NC}"
 mkdir -p "$MONITOR_DIR"
 mkdir -p "$LOG_DIR"
 
-# Copiar archivos
-echo -e "${YELLOW}Copiando archivos...${NC}"
-cp "$SCRIPT_DIR/monitor.py" "$MONITOR_DIR/monitor.py"
-chmod +x "$MONITOR_DIR/monitor.py"
+# Verificar si ya estamos en el directorio de destino
+if [ "$(realpath "$SCRIPT_DIR")" = "$(realpath "$MONITOR_DIR")" ]; then
+    echo -e "${GREEN}✓ Los archivos ya están en el directorio de destino${NC}"
+    echo -e "${YELLOW}Asegurando permisos de ejecución...${NC}"
+    chmod +x "$MONITOR_DIR/monitor.py" 2>/dev/null || true
+else
+    # Copiar archivos
+    echo -e "${YELLOW}Copiando archivos...${NC}"
+    cp "$SCRIPT_DIR/monitor.py" "$MONITOR_DIR/monitor.py"
+    chmod +x "$MONITOR_DIR/monitor.py"
+fi
 
 # Copiar archivos systemd
 echo -e "${YELLOW}Instalando archivos systemd...${NC}"
