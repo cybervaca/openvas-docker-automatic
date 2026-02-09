@@ -137,16 +137,15 @@ def crear_tunel_ssh_socks(config_monitor):
     ]
     
     # Añadir clave SSH solo si está especificada y existe
-    # Si no se especifica, SSH usará la clave por defecto del usuario (normalmente ~/.ssh/id_rsa)
-    if ssh_key:
-        if os.path.exists(ssh_key):
-            ssh_cmd.extend(['-i', ssh_key])
+    # Si no se especifica o es null/None, SSH usará la clave por defecto del usuario (normalmente ~/.ssh/id_rsa)
+    if ssh_key and ssh_key != 'null' and ssh_key != 'None' and ssh_key.lower() != 'none':
+        if os.path.exists(str(ssh_key)):
+            ssh_cmd.extend(['-i', str(ssh_key)])
             # Asegurar permisos correctos de la clave
-            os.chmod(ssh_key, 0o600)
+            os.chmod(str(ssh_key), 0o600)
         else:
             escribir_log(f"Clave SSH especificada pero no encontrada en {ssh_key}, usando clave por defecto", 'WARNING')
-    else:
-        escribir_log("Usando clave SSH por defecto del usuario (desde ~/.ssh/)", 'INFO')
+    # Si ssh_key es None, null, o no está especificado, no añadir -i (usar clave por defecto)
     
     ssh_cmd.append(f'{vps_user}@{vps_host}')
     
@@ -164,19 +163,36 @@ def crear_tunel_ssh_socks(config_monitor):
             stdin=subprocess.DEVNULL
         )
         
-        # Esperar un momento para verificar que se creó correctamente
+        # Esperar y verificar que el túnel esté realmente escuchando
         import time
-        time.sleep(2)
+        max_attempts = 10
+        for attempt in range(max_attempts):
+            time.sleep(0.5)
+            # Verificar que el proceso sigue corriendo
+            if process.poll() is not None:
+                stdout, stderr = process.communicate()
+                error_msg = stderr.decode('utf-8', errors='ignore')
+                escribir_log(f"Error al crear túnel SSH: {error_msg}", 'ERROR')
+                return False
+            
+            # Verificar que el puerto SOCKS esté escuchando
+            try:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(1)
+                result = sock.connect_ex((socks_host, socks_port))
+                sock.close()
+                if result == 0:
+                    ssh_tunnel_process = process
+                    escribir_log(f"Túnel SSH SOCKS creado y escuchando en {socks_host}:{socks_port}", 'INFO')
+                    return True
+            except:
+                pass
         
-        if process.poll() is None:
-            ssh_tunnel_process = process
-            escribir_log(f"Túnel SSH SOCKS creado en {socks_host}:{socks_port}", 'INFO')
-            return True
-        else:
-            stdout, stderr = process.communicate()
-            error_msg = stderr.decode('utf-8', errors='ignore')
-            escribir_log(f"Error al crear túnel SSH: {error_msg}", 'ERROR')
-            return False
+        # Si llegamos aquí, el túnel no se estableció correctamente
+        process.terminate()
+        process.wait(timeout=2)
+        escribir_log(f"Timeout: El túnel SSH no está escuchando en {socks_host}:{socks_port} después de {max_attempts * 0.5} segundos", 'ERROR')
+        return False
             
     except Exception as e:
         escribir_log(f"Error al crear túnel SSH: {e}", 'ERROR')
