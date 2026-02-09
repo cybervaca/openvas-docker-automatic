@@ -86,11 +86,19 @@ if [ "$(realpath "$SCRIPT_DIR")" = "$(realpath "$MONITOR_DIR")" ]; then
     echo -e "${GREEN}✓ Los archivos ya están en el directorio de destino${NC}"
     echo -e "${YELLOW}Asegurando permisos de ejecución...${NC}"
     chmod +x "$MONITOR_DIR/monitor.py" 2>/dev/null || true
+    if [ -f "$SCRIPT_DIR/monitor-wrapper.sh" ]; then
+        chmod +x "$MONITOR_DIR/monitor-wrapper.sh" 2>/dev/null || true
+    fi
 else
     # Copiar archivos
     echo -e "${YELLOW}Copiando archivos...${NC}"
     cp "$SCRIPT_DIR/monitor.py" "$MONITOR_DIR/monitor.py"
     chmod +x "$MONITOR_DIR/monitor.py"
+    # Copiar wrapper script si existe
+    if [ -f "$SCRIPT_DIR/monitor-wrapper.sh" ]; then
+        cp "$SCRIPT_DIR/monitor-wrapper.sh" "$MONITOR_DIR/monitor-wrapper.sh"
+        chmod +x "$MONITOR_DIR/monitor-wrapper.sh"
+    fi
 fi
 
 # Configurar permisos en directorios y archivos
@@ -106,6 +114,10 @@ fi
 chown -R "$SERVICE_USER:$SERVICE_GROUP" "$MONITOR_DIR"
 chmod 755 "$MONITOR_DIR"
 chmod 755 "$MONITOR_DIR/monitor.py"
+# Permisos en wrapper script si existe
+if [ -f "$MONITOR_DIR/monitor-wrapper.sh" ]; then
+    chmod 755 "$MONITOR_DIR/monitor-wrapper.sh"
+fi
 
 # Permisos en directorio de logs (lectura/escritura para el usuario)
 chown -R "$SERVICE_USER:$SERVICE_GROUP" "$LOG_DIR"
