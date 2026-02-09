@@ -118,10 +118,12 @@ def main():
     
     # Verificar cooldown
     print("\n7. Verificando cooldown...")
-    if puede_enviar_alerta('container', config):
-        print("   ✓ Puede enviar alerta de contenedor (no hay cooldown activo)")
+    if puede_enviar_alerta('monitoring', config):
+        print("   ✓ Puede enviar alerta de monitoreo (no hay cooldown activo)")
     else:
-        print("   ⚠️  Cooldown activo para alerta de contenedor")
+        print("   ⚠️  Cooldown activo para alerta de monitoreo")
+        print("   (Se envió una alerta recientemente, espera el tiempo de cooldown)")
+        print("   Para resetear el cooldown, elimina: /opt/gvm/logs/monitoring/alert_cooldown.json")
     
     # Ejecutar todas las verificaciones
     print("\n8. Ejecutando todas las verificaciones...")
