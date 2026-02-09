@@ -1,5 +1,23 @@
 # Changelog
 
+## [2.5.1] - 2026-02-09
+
+### Mejorado
+- **Servicio de Monitoreo OpenVAS** - Seguridad mejorada
+  - Cambio de usuario de ejecución de `root` a `redteam` (usuario no-root)
+  - Script de instalación actualizado para crear usuario `redteam` si no existe
+  - Configuración automática de permisos y grupo docker
+  - Soporte para reinstalación automática del servicio
+  - Documentación actualizada con el nuevo usuario
+
+### Cambios Técnicos
+- `Monitor/openvas-monitor.service` - Usuario cambiado a `redteam`
+- `Monitor/install-monitor.sh` - Mejoras en instalación y reinstalación:
+  - Creación automática del usuario si no existe
+  - Detección y reinstalación automática si el servicio ya está instalado
+  - Configuración mejorada de permisos para usuario no-root
+- `Monitor/README.md` - Documentación actualizada con usuario `redteam`
+
 ## [2.5.0] - 2026-02-09
 
 ### Añadido

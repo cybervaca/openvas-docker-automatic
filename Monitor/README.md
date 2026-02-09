@@ -79,8 +79,8 @@ Si Telegram está bloqueado por firewall corporativo, puedes crear este archivo 
 
 **Requisitos previos:**
 - Tu clave SSH pública debe estar en `~/.ssh/authorized_keys` del usuario en el VPS
-- El servicio se ejecuta como `root`, así que usará la clave SSH de root (`/root/.ssh/id_rsa`)
-- Asegúrate de que la clave pública de root esté en el `authorized_keys` del VPS
+- El servicio se ejecuta como `redteam`, así que usará la clave SSH de ese usuario (normalmente `/home/redteam/.ssh/id_rsa` o la especificada en `ssh_key_path`)
+- Asegúrate de que la clave pública esté en el `authorized_keys` del VPS
 
 **Crear configuración del túnel** en `/opt/gvm/Monitor/config.json`:
 ```json
@@ -109,7 +109,7 @@ Si Telegram está bloqueado por firewall corporativo, puedes crear este archivo 
 **Notas importantes:** 
 - **El archivo es opcional:** Si `/opt/gvm/Monitor/config.json` no existe, el servicio funcionará sin túnel SOCKS
 - El túnel se crea bajo demanda (solo cuando se necesita enviar una alerta) y se cierra automáticamente después
-- Si `ssh_key_path` es `null` o no se especifica, se usará la clave SSH por defecto del usuario (normalmente `/root/.ssh/id_rsa`)
+- Si `ssh_key_path` es `null` o no se especifica, se usará la clave SSH por defecto del usuario `redteam` (normalmente `/home/redteam/.ssh/id_rsa`)
 - Asegúrate de que la clave pública esté en el `authorized_keys` del VPS antes de usar el servicio
 - Si no necesitas túnel SOCKS (Telegram no está bloqueado), simplemente no crees este archivo
 
@@ -326,9 +326,12 @@ El servicio verifica los siguientes aspectos:
    chmod +x /opt/gvm/Monitor/monitor.py
    ```
 
-2. Verifica que el usuario tenga acceso a Docker:
+2. Verifica que el usuario del servicio tenga acceso a Docker:
    ```bash
-   sudo usermod -aG docker $USER
+   # El servicio se ejecuta como redteam
+   sudo usermod -aG docker redteam
+   # Reinicia el servicio para aplicar cambios
+   sudo systemctl restart openvas-monitor.service
    ```
 
 ### El servicio no puede verificar Docker
@@ -340,8 +343,10 @@ El servicio verifica los siguientes aspectos:
    ```
 
 2. Verifica que el usuario del servicio tenga permisos:
-   - El servicio se ejecuta como `root` por defecto
-   - Si cambias el usuario, asegúrate de que tenga acceso a Docker
+   - El servicio se ejecuta como `redteam` (usuario no-root)
+   - El usuario `redteam` debe estar en el grupo `docker`
+   - El script de instalación configura esto automáticamente
+   - Si hay problemas, verifica: `groups redteam` (debe incluir `docker`)
 
 ## Desinstalación
 
@@ -395,7 +400,9 @@ Monitor/
 
 ## Seguridad
 
-- El servicio se ejecuta como `root` para tener acceso a Docker y systemctl
+- El servicio se ejecuta como `redteam` (usuario no-root) para mejorar la seguridad
+- El usuario `redteam` está en el grupo `docker` para tener acceso a comandos Docker
+- Los permisos de archivos y directorios se configuran automáticamente durante la instalación
 - Las credenciales de Telegram se leen desde `config.json` (asegúrate de proteger este archivo)
 - Los logs no exponen credenciales (bot_token, chat_id)
 - Rate limiting implementado mediante cooldown para evitar spam
