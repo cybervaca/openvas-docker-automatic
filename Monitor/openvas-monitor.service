@@ -9,7 +9,8 @@ User=redteam
 Group=redteam
 WorkingDirectory=/opt/gvm/Monitor
 # Usar wrapper script que activa el entorno virtual antes de ejecutar
-ExecStart=/opt/gvm/Monitor/monitor-wrapper.sh
+# Especificar explícitamente bash para asegurar que el script se ejecute correctamente
+ExecStart=/bin/bash /opt/gvm/Monitor/monitor-wrapper.sh
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=openvas-monitor
