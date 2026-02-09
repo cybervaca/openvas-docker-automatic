@@ -22,12 +22,16 @@ import xml.etree.ElementTree as ET
 
 # Configuración
 CONFIG_PATH = '/opt/gvm/Config/config.json'
+MONITOR_CONFIG_PATH = '/opt/gvm/Monitor/config.json'
 LOG_DIR = '/opt/gvm/logs/monitoring'
 LOG_FILE = f'{LOG_DIR}/monitor.log'
 ALERT_COOLDOWN_FILE = f'{LOG_DIR}/alert_cooldown.json'
 CONTAINER_NAME = 'openvas'
 GVM_PORT = 9390
 GSAD_PORT = 9392
+
+# Variable global para el proceso del túnel SSH
+ssh_tunnel_process = None
 
 def leer_configuracion():
     """Lee la configuración desde config.json"""
@@ -44,6 +48,17 @@ def leer_configuracion():
     except Exception as e:
         print(f"ERROR: Ocurrió un error al leer configuración: {e}")
         sys.exit(1)
+
+def leer_configuracion_monitor():
+    """Lee la configuración específica del monitor desde Monitor/config.json"""
+    try:
+        if os.path.exists(MONITOR_CONFIG_PATH):
+            with open(MONITOR_CONFIG_PATH, 'r') as archivo:
+                return json.load(archivo)
+        return {}
+    except Exception as e:
+        escribir_log(f"Error al leer configuración del monitor: {e}", 'WARNING')
+        return {}
 
 def escribir_log(mensaje, nivel='INFO'):
     """Escribe un mensaje en el log estructurado"""
@@ -69,10 +84,135 @@ def escribir_log(mensaje, nivel='INFO'):
     
     print(f"[{timestamp}] [{nivel}] {mensaje}")
 
-def enviar_telegram(mensaje, bot_token, chat_id):
-    """Envía un mensaje por Telegram"""
+def crear_tunel_ssh_socks(config_monitor):
+    """Crea un túnel SSH SOCKS bajo demanda"""
+    global ssh_tunnel_process
+    
+    ssh_config = config_monitor.get('ssh_tunnel', {})
+    
+    if not ssh_config.get('enabled', False):
+        return None
+    
+    # Verificar si el túnel ya existe y está activo
+    if ssh_tunnel_process and ssh_tunnel_process.poll() is None:
+        # Verificar que el puerto SOCKS esté realmente escuchando
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(1)
+            result = sock.connect_ex((ssh_config.get('socks_host', '127.0.0.1'), 
+                                     ssh_config.get('socks_port', 1080)))
+            sock.close()
+            if result == 0:
+                escribir_log("Túnel SSH SOCKS ya está activo", 'INFO')
+                return True
+        except:
+            pass
+    
+    # Crear nuevo túnel
+    vps_host = ssh_config.get('vps_host')
+    vps_port = ssh_config.get('vps_port', 22)
+    vps_user = ssh_config.get('vps_user')
+    ssh_key = ssh_config.get('ssh_key_path')
+    socks_port = ssh_config.get('socks_port', 1080)
+    socks_host = ssh_config.get('socks_host', '127.0.0.1')
+    
+    if not vps_host or not vps_user:
+        escribir_log("Configuración SSH incompleta (falta vps_host o vps_user)", 'ERROR')
+        return False
+    
+    # Construir comando SSH
+    ssh_cmd = [
+        'ssh',
+        '-N',  # No ejecutar comando remoto
+        '-D', f'{socks_host}:{socks_port}',  # SOCKS proxy
+        '-o', 'StrictHostKeyChecking=no',  # No verificar host key (opcional, puede cambiarse)
+        '-o', 'UserKnownHostsFile=/dev/null',
+        '-o', 'LogLevel=ERROR',  # Reducir output
+        '-f',  # Background
+    ]
+    
+    # Añadir clave SSH si está especificada
+    if ssh_key and os.path.exists(ssh_key):
+        ssh_cmd.extend(['-i', ssh_key])
+        # Asegurar permisos correctos de la clave
+        os.chmod(ssh_key, 0o600)
+    else:
+        escribir_log(f"Clave SSH no encontrada en {ssh_key}, usando clave por defecto", 'WARNING')
+    
+    ssh_cmd.append(f'{vps_user}@{vps_host}')
+    
+    # Si el puerto no es 22, añadirlo
+    if vps_port != 22:
+        ssh_cmd.insert(-1, '-p')
+        ssh_cmd.insert(-1, str(vps_port))
+    
+    try:
+        escribir_log(f"Creando túnel SSH SOCKS a {vps_user}@{vps_host}:{vps_port}", 'INFO')
+        process = subprocess.Popen(
+            ssh_cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            stdin=subprocess.DEVNULL
+        )
+        
+        # Esperar un momento para verificar que se creó correctamente
+        import time
+        time.sleep(2)
+        
+        if process.poll() is None:
+            ssh_tunnel_process = process
+            escribir_log(f"Túnel SSH SOCKS creado en {socks_host}:{socks_port}", 'INFO')
+            return True
+        else:
+            stdout, stderr = process.communicate()
+            error_msg = stderr.decode('utf-8', errors='ignore')
+            escribir_log(f"Error al crear túnel SSH: {error_msg}", 'ERROR')
+            return False
+            
+    except Exception as e:
+        escribir_log(f"Error al crear túnel SSH: {e}", 'ERROR')
+        return False
+
+def cerrar_tunel_ssh():
+    """Cierra el túnel SSH si está activo"""
+    global ssh_tunnel_process
+    
+    if ssh_tunnel_process and ssh_tunnel_process.poll() is None:
+        try:
+            ssh_tunnel_process.terminate()
+            ssh_tunnel_process.wait(timeout=5)
+            escribir_log("Túnel SSH SOCKS cerrado", 'INFO')
+        except:
+            try:
+                ssh_tunnel_process.kill()
+            except:
+                pass
+        finally:
+            ssh_tunnel_process = None
+
+def enviar_telegram(mensaje, bot_token, chat_id, config_monitor=None):
+    """Envía un mensaje por Telegram, usando túnel SOCKS si está configurado"""
     # Asegurar que chat_id sea string (puede venir como número del JSON)
     chat_id = str(chat_id)
+    
+    # Leer configuración del monitor si no se proporciona
+    if config_monitor is None:
+        config_monitor = leer_configuracion_monitor()
+    
+    # Crear túnel SSH SOCKS si está configurado
+    ssh_config = config_monitor.get('ssh_tunnel', {})
+    usar_proxy = ssh_config.get('enabled', False)
+    
+    proxies = None
+    if usar_proxy:
+        if crear_tunel_ssh_socks(config_monitor):
+            socks_host = ssh_config.get('socks_host', '127.0.0.1')
+            socks_port = ssh_config.get('socks_port', 1080)
+            proxies = {
+                'http': f'socks5://{socks_host}:{socks_port}',
+                'https': f'socks5://{socks_host}:{socks_port}'
+            }
+            escribir_log(f"Usando proxy SOCKS {socks_host}:{socks_port} para Telegram", 'INFO')
     
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
     payload = {
@@ -82,8 +222,13 @@ def enviar_telegram(mensaje, bot_token, chat_id):
     }
     
     try:
-        response = requests.post(url, json=payload, timeout=10)
+        response = requests.post(url, json=payload, proxies=proxies, timeout=30)
         response.raise_for_status()
+        
+        # Cerrar túnel después de enviar (bajo demanda)
+        if usar_proxy:
+            cerrar_tunel_ssh()
+        
         return True
     except requests.exceptions.HTTPError as e:
         error_detail = ""
@@ -93,9 +238,13 @@ def enviar_telegram(mensaje, bot_token, chat_id):
         except:
             pass
         escribir_log(f"Error HTTP al enviar mensaje a Telegram: {e}{error_detail}", 'ERROR')
+        if usar_proxy:
+            cerrar_tunel_ssh()
         return False
     except requests.exceptions.RequestException as e:
         escribir_log(f"Error al enviar mensaje a Telegram: {e}", 'ERROR')
+        if usar_proxy:
+            cerrar_tunel_ssh()
         return False
 
 def cargar_cooldown():
@@ -335,6 +484,9 @@ def enviar_alertas(resultados, config):
     # Asegurar que chat_id sea string
     chat_id = str(chat_id)
     
+    # Leer configuración del monitor para el túnel SSH
+    config_monitor = leer_configuracion_monitor()
+    
     timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     
     # Verificar y enviar alertas según configuración
@@ -345,7 +497,7 @@ def enviar_alertas(resultados, config):
         if puede_enviar_alerta('container', config):
             mensaje = formatear_mensaje_alerta('container', 
                 {'message': 'Contenedor no está corriendo'}, timestamp)
-            if enviar_telegram(mensaje, bot_token, chat_id):
+            if enviar_telegram(mensaje, bot_token, chat_id, config_monitor):
                 registrar_alerta_enviada('container')
                 resultados['alerts_sent'].append('container')
                 escribir_log("Alerta de contenedor enviada por Telegram")
@@ -355,7 +507,7 @@ def enviar_alertas(resultados, config):
         if puede_enviar_alerta('docker', config):
             mensaje = formatear_mensaje_alerta('docker',
                 {'message': 'Docker daemon no está activo'}, timestamp)
-            if enviar_telegram(mensaje, bot_token, chat_id):
+            if enviar_telegram(mensaje, bot_token, chat_id, config_monitor):
                 registrar_alerta_enviada('docker')
                 resultados['alerts_sent'].append('docker')
                 escribir_log("Alerta de Docker daemon enviada por Telegram")
@@ -366,7 +518,7 @@ def enviar_alertas(resultados, config):
             if puede_enviar_alerta('gvm', config):
                 mensaje = formatear_mensaje_alerta('gvm_connection',
                     {'message': 'GVM no responde correctamente'}, timestamp)
-                if enviar_telegram(mensaje, bot_token, chat_id):
+                if enviar_telegram(mensaje, bot_token, chat_id, config_monitor):
                     registrar_alerta_enviada('gvm')
                     resultados['alerts_sent'].append('gvm')
                     escribir_log("Alerta de GVM enviada por Telegram")
@@ -376,51 +528,55 @@ def enviar_alertas(resultados, config):
         if puede_enviar_alerta('image', config):
             mensaje = formatear_mensaje_alerta('image',
                 {'message': 'Actualización de imagen disponible'}, timestamp)
-            if enviar_telegram(mensaje, bot_token, chat_id):
+            if enviar_telegram(mensaje, bot_token, chat_id, config_monitor):
                 registrar_alerta_enviada('image')
                 resultados['alerts_sent'].append('image')
                 escribir_log("Alerta de actualización de imagen enviada por Telegram")
 
 def main():
     """Función principal"""
-    escribir_log("Iniciando verificación de monitoreo")
-    
-    # Leer configuración
-    config = leer_configuracion()
-    
-    # Verificar si el monitoreo está habilitado
-    monitoring_config = config.get('monitoring', {})
-    if not monitoring_config.get('enabled', False):
-        escribir_log("Monitoreo deshabilitado en configuración", 'INFO')
-        return
-    
-    # Ejecutar verificaciones
-    resultados = ejecutar_verificaciones(config)
-    
-    # Enviar alertas si es necesario
-    enviar_alertas(resultados, config)
-    
-    # Guardar resultado en log estructurado
-    os.makedirs(LOG_DIR, exist_ok=True)
-    log_entry = {
-        'timestamp': resultados['timestamp'],
-        'status': resultados['status'],
-        'checks': resultados['checks'],
-        'alerts_sent': len(resultados['alerts_sent']) > 0
-    }
-    
-    with open(LOG_FILE, 'a') as f:
-        f.write(json.dumps(log_entry) + '\n')
-    
-    escribir_log(f"Verificación completada. Estado: {resultados['status']}")
-    
-    # Exit code según el estado
-    if resultados['status'] == 'error':
-        sys.exit(1)
-    elif resultados['status'] == 'warning':
-        sys.exit(0)
-    else:
-        sys.exit(0)
+    try:
+        escribir_log("Iniciando verificación de monitoreo")
+        
+        # Leer configuración
+        config = leer_configuracion()
+        
+        # Verificar si el monitoreo está habilitado
+        monitoring_config = config.get('monitoring', {})
+        if not monitoring_config.get('enabled', False):
+            escribir_log("Monitoreo deshabilitado en configuración", 'INFO')
+            return
+        
+        # Ejecutar verificaciones
+        resultados = ejecutar_verificaciones(config)
+        
+        # Enviar alertas si es necesario
+        enviar_alertas(resultados, config)
+        
+        # Guardar resultado en log estructurado
+        os.makedirs(LOG_DIR, exist_ok=True)
+        log_entry = {
+            'timestamp': resultados['timestamp'],
+            'status': resultados['status'],
+            'checks': resultados['checks'],
+            'alerts_sent': len(resultados['alerts_sent']) > 0
+        }
+        
+        with open(LOG_FILE, 'a') as f:
+            f.write(json.dumps(log_entry) + '\n')
+        
+        escribir_log(f"Verificación completada. Estado: {resultados['status']}")
+        
+        # Exit code según el estado
+        if resultados['status'] == 'error':
+            sys.exit(1)
+        elif resultados['status'] == 'warning':
+            sys.exit(0)
+        else:
+            sys.exit(0)
+    finally:
+        # Asegurar que el túnel SSH se cierre al finalizar
+        cerrar_tunel_ssh()
 
 if __name__ == '__main__':
     main()

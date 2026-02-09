@@ -16,6 +16,7 @@ s3transfer==0.10.1
 # Microsoft Graph/SharePoint Integration
 msal
 requests==2.32.4
+PySocks==1.7.1
 
 # Excel/CSV Processing
 openpyxl==3.1.2
