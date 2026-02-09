@@ -64,6 +64,9 @@ def escribir_log(mensaje, nivel='INFO'):
 
 def enviar_telegram(mensaje, bot_token, chat_id):
     """Envía un mensaje por Telegram"""
+    # Asegurar que chat_id sea string (puede venir como número del JSON)
+    chat_id = str(chat_id)
+    
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
     payload = {
         'chat_id': chat_id,
@@ -75,6 +78,15 @@ def enviar_telegram(mensaje, bot_token, chat_id):
         response = requests.post(url, json=payload, timeout=10)
         response.raise_for_status()
         return True
+    except requests.exceptions.HTTPError as e:
+        error_detail = ""
+        try:
+            error_json = response.json()
+            error_detail = f" - {error_json.get('description', '')}"
+        except:
+            pass
+        escribir_log(f"Error HTTP al enviar mensaje a Telegram: {e}{error_detail}", 'ERROR')
+        return False
     except requests.exceptions.RequestException as e:
         escribir_log(f"Error al enviar mensaje a Telegram: {e}", 'ERROR')
         return False
@@ -312,6 +324,9 @@ def enviar_alertas(resultados, config):
     if not bot_token or not chat_id:
         escribir_log("Telegram no configurado (falta bot_token o chat_id)", 'WARNING')
         return
+    
+    # Asegurar que chat_id sea string
+    chat_id = str(chat_id)
     
     timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     
