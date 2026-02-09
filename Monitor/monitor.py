@@ -687,12 +687,30 @@ def enviar_alertas(resultados, config):
     # Por ahora solo enviamos si hay problemas (para evitar spam cuando todo está OK)
     if tiene_problemas:
         # Verificar cooldown (usamos 'monitoring' como tipo único para el mensaje completo)
-        if puede_enviar_alerta('monitoring', config):
+        puede_enviar = puede_enviar_alerta('monitoring', config)
+        escribir_log(f"Verificación de cooldown: puede_enviar={puede_enviar}, tiene_problemas={tiene_problemas}", 'DEBUG')
+        
+        if puede_enviar:
             mensaje = formatear_mensaje_alerta_completo(resultados, config, timestamp)
+            escribir_log(f"Preparando envío de alerta (tamaño mensaje: {len(mensaje)} caracteres)", 'INFO')
             if enviar_telegram(mensaje, bot_token, chat_id, config_monitor):
                 registrar_alerta_enviada('monitoring')
                 resultados['alerts_sent'].append('monitoring')
-                escribir_log("Alerta completa enviada por Telegram")
+                escribir_log("Alerta completa enviada por Telegram", 'INFO')
+            else:
+                escribir_log("Error al enviar alerta por Telegram", 'ERROR')
+        else:
+            cooldown_data = cargar_cooldown()
+            if 'monitoring' in cooldown_data:
+                ultimo_envio = datetime.datetime.fromisoformat(cooldown_data['monitoring'])
+                tiempo_transcurrido = (datetime.datetime.now() - ultimo_envio).total_seconds()
+                cooldown_seconds = monitoring_config.get('alert_cooldown', 3600)
+                tiempo_restante = cooldown_seconds - tiempo_transcurrido
+                escribir_log(f"Cooldown activo. Tiempo restante: {int(tiempo_restante)} segundos", 'INFO')
+            else:
+                escribir_log("No se puede enviar alerta (cooldown activo pero sin datos)", 'WARNING')
+    else:
+        escribir_log("No hay problemas que reportar, no se envía alerta", 'INFO')
 
 def main():
     """Función principal"""
