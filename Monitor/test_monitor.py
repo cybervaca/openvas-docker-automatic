@@ -70,18 +70,39 @@ def main():
         if not isinstance(chat_id, str):
             print(f"   ⚠️  ADVERTENCIA: chat_id debe ser string, no {type(chat_id).__name__}")
             print(f"   En config.json debe estar entre comillas: \"chat_id\": \"{chat_id}\"")
+        
+        # Verificar que sea el chat_id del supergrupo (debe empezar con -100)
+        if not str(chat_id).startswith('-100'):
+            print(f"   ⚠️  ADVERTENCIA: El chat_id parece ser de un grupo normal, no del supergrupo")
+            print(f"   El supergrupo 'RedTeam-Corp-Atento' tiene chat_id: -1003719877339")
+            print(f"   Actualmente configurado: {chat_id}")
+            print(f"   Considera actualizar config.json con el chat_id del supergrupo")
     
     # Test de envío de Telegram
     print("\n4. Probando envío a Telegram...")
     test_message = "🧪 <b>Test de Monitoreo OpenVAS</b>\n\nEste es un mensaje de prueba del servicio de monitoreo."
-    if enviar_telegram(test_message, bot_token, str(chat_id)):
-        print("   ✓ Mensaje de prueba enviado correctamente")
-    else:
-        print("   ✗ Error al enviar mensaje de prueba")
-        print("   Verifica que:")
-        print("   - El bot_token sea correcto")
-        print("   - El chat_id sea correcto")
-        print("   - El bot esté añadido al grupo/canal")
+    try:
+        if enviar_telegram(test_message, bot_token, str(chat_id)):
+            print("   ✓ Mensaje de prueba enviado correctamente")
+        else:
+            print("   ✗ Error al enviar mensaje de prueba")
+            print("   Verifica que:")
+            print("   - El bot_token sea correcto")
+            print("   - El chat_id sea correcto")
+            print("   - El bot esté añadido al grupo/canal")
+    except Exception as e:
+        print(f"   ✗ Error de conexión: {e}")
+        print("\n   ⚠️  PROBLEMA DE RED DETECTADO:")
+        print("   - El servidor no puede conectarse a api.telegram.org")
+        print("   - Posibles causas:")
+        print("     * Firewall bloqueando salida HTTPS (puerto 443)")
+        print("     * Proxy necesario (configurar variables HTTP_PROXY/HTTPS_PROXY)")
+        print("     * Red no configurada correctamente")
+        print("\n   Soluciones:")
+        print("   1. Verificar conectividad: curl -I https://api.telegram.org")
+        print("   2. Si hay proxy, configurar:")
+        print("      export HTTPS_PROXY=http://proxy:puerto")
+        print("   3. Verificar reglas de firewall")
     
     # Verificar contenedor
     print("\n5. Verificando contenedor Docker...")
