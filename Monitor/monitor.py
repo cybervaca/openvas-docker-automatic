@@ -439,8 +439,36 @@ def verificar_actualizacion_imagen():
     except Exception as e:
         return {'status': 'warning', 'message': f'Error al verificar actualización: {str(e)}'}
 
-def formatear_mensaje_alerta(tipo, detalles, timestamp):
-    """Formatea un mensaje de alerta para Telegram"""
+def formatear_mensaje_alerta_completo(resultados, config, timestamp):
+    """Formatea un mensaje completo con todas las alertas agrupadas"""
+    pais = config.get('pais', 'N/A')
+    site = config.get('site', 'N/A')
+    region = config.get('region', 'N/A')
+    
+    # Determinar nivel de alerta general
+    checks = resultados['checks']
+    tiene_errores = any(status == 'error' for status in checks.values())
+    tiene_warnings = any(status == 'warning' for status in checks.values())
+    
+    if tiene_errores:
+        emoji_principal = '🔴'
+        titulo = 'ALERTA CRÍTICA'
+    elif tiene_warnings:
+        emoji_principal = '🟡'
+        titulo = 'ADVERTENCIA'
+    else:
+        emoji_principal = '✅'
+        titulo = 'ESTADO OK'
+    
+    # Encabezado del mensaje
+    mensaje = f"{emoji_principal} <b>{titulo}: OpenVAS Monitor</b>\n\n"
+    mensaje += f"<b>País:</b> {pais}\n"
+    mensaje += f"<b>Site:</b> {site}\n"
+    mensaje += f"<b>Región:</b> {region}\n"
+    mensaje += f"<b>Hora:</b> {timestamp}\n"
+    mensaje += "\n" + "="*40 + "\n\n"
+    
+    # Emojis para cada tipo de check
     emojis = {
         'container': '🐳',
         'docker': '🔧',
@@ -450,24 +478,78 @@ def formatear_mensaje_alerta(tipo, detalles, timestamp):
         'image': '🔄'
     }
     
-    emoji = emojis.get(tipo, '⚠️')
-    
-    mensaje = f"{emoji} <b>ALERTA: {tipo.upper().replace('_', ' ')}</b>\n\n"
-    mensaje += f"<b>Estado:</b> {detalles['message']}\n"
-    mensaje += f"<b>Hora:</b> {timestamp}\n"
-    
-    # Añadir acciones recomendadas según el tipo
-    acciones = {
-        'container': "Acción: Verificar con 'docker ps -a' y 'docker start openvas'",
-        'docker': "Acción: Verificar con 'systemctl status docker' y 'systemctl start docker'",
-        'gvmd': "Acción: Verificar logs del contenedor con 'docker logs openvas'",
-        'gsad': "Acción: Verificar que el puerto 9392 esté accesible",
-        'gvm_connection': "Acción: Verificar credenciales y que GVM esté funcionando",
-        'image': "Acción: Considerar actualizar con 'docker pull immauss/openvas:latest'"
+    # Nombres descriptivos
+    nombres = {
+        'container': 'Contenedor Docker',
+        'docker': 'Docker Daemon',
+        'gvmd': 'GVM (Puerto 9390)',
+        'gsad': 'GSAD Web UI (Puerto 9392)',
+        'gvm_connection': 'Conexión GVM TLS',
+        'image': 'Actualización de Imagen'
     }
     
-    if tipo in acciones:
-        mensaje += f"\n<b>{acciones[tipo]}</b>"
+    # Mensajes de estado
+    mensajes_estado = {
+        'ok': '✅ OK',
+        'error': '❌ ERROR',
+        'warning': '⚠️ WARNING'
+    }
+    
+    # Agrupar alertas por tipo
+    alertas = []
+    warnings = []
+    ok_items = []
+    
+    for check_name, status in checks.items():
+        emoji = emojis.get(check_name, '•')
+        nombre = nombres.get(check_name, check_name)
+        estado_emoji = mensajes_estado.get(status, status)
+        
+        item = f"{emoji} <b>{nombre}:</b> {estado_emoji}"
+        
+        if status == 'error':
+            alertas.append(item)
+        elif status == 'warning':
+            warnings.append(item)
+        else:
+            ok_items.append(item)
+    
+    # Construir mensaje agrupado
+    if alertas:
+        mensaje += "<b>🔴 PROBLEMAS CRÍTICOS:</b>\n"
+        for alerta in alertas:
+            mensaje += f"{alerta}\n"
+        mensaje += "\n"
+    
+    if warnings:
+        mensaje += "<b>🟡 ADVERTENCIAS:</b>\n"
+        for warning in warnings:
+            mensaje += f"{warning}\n"
+        mensaje += "\n"
+    
+    if ok_items:
+        mensaje += "<b>✅ ESTADO OK:</b>\n"
+        for ok_item in ok_items:
+            mensaje += f"{ok_item}\n"
+        mensaje += "\n"
+    
+    # Añadir acciones recomendadas si hay problemas
+    if alertas:
+        mensaje += "\n" + "="*40 + "\n"
+        mensaje += "<b>ACCIONES RECOMENDADAS:</b>\n\n"
+        
+        acciones = {
+            'container': "🐳 Contenedor: Verificar con 'docker ps -a' y 'docker start openvas'",
+            'docker': "🔧 Docker: Verificar con 'systemctl status docker' y 'systemctl start docker'",
+            'gvmd': "🛡️ GVM: Verificar logs con 'docker logs openvas'",
+            'gsad': "🌐 GSAD: Verificar que el puerto 9392 esté accesible",
+            'gvm_connection': "🔌 Conexión: Verificar credenciales y que GVM esté funcionando",
+            'image': "🔄 Imagen: Considerar actualizar con 'docker pull immauss/openvas:latest'"
+        }
+        
+        for check_name, status in checks.items():
+            if status == 'error' and check_name in acciones:
+                mensaje += f"{acciones[check_name]}\n"
     
     return mensaje
 
@@ -525,7 +607,7 @@ def ejecutar_verificaciones(config):
     return resultados
 
 def enviar_alertas(resultados, config):
-    """Envía alertas por Telegram según los resultados"""
+    """Envía alertas por Telegram según los resultados (mensaje único agrupado)"""
     monitoring_config = config.get('monitoring', {})
     
     if not monitoring_config.get('enabled', False):
@@ -547,49 +629,39 @@ def enviar_alertas(resultados, config):
     
     timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     
-    # Verificar y enviar alertas según configuración
+    # Verificar si hay algo que reportar
     checks = resultados['checks']
     
-    # Alerta de contenedor
+    # Determinar si hay problemas según configuración
+    tiene_problemas = False
+    
+    # Verificar contenedor
     if monitoring_config.get('alert_on_container_down', True) and checks.get('container') != 'ok':
-        if puede_enviar_alerta('container', config):
-            mensaje = formatear_mensaje_alerta('container', 
-                {'message': 'Contenedor no está corriendo'}, timestamp)
-            if enviar_telegram(mensaje, bot_token, chat_id, config_monitor):
-                registrar_alerta_enviada('container')
-                resultados['alerts_sent'].append('container')
-                escribir_log("Alerta de contenedor enviada por Telegram")
+        tiene_problemas = True
     
-    # Alerta de Docker daemon
+    # Verificar Docker daemon
     if monitoring_config.get('alert_on_docker_down', True) and checks.get('docker') != 'ok':
-        if puede_enviar_alerta('docker', config):
-            mensaje = formatear_mensaje_alerta('docker',
-                {'message': 'Docker daemon no está activo'}, timestamp)
-            if enviar_telegram(mensaje, bot_token, chat_id, config_monitor):
-                registrar_alerta_enviada('docker')
-                resultados['alerts_sent'].append('docker')
-                escribir_log("Alerta de Docker daemon enviada por Telegram")
+        tiene_problemas = True
     
-    # Alerta de GVM
+    # Verificar GVM
     if monitoring_config.get('alert_on_gvm_down', True):
         if checks.get('gvmd') != 'ok' or checks.get('gvm_connection') != 'ok':
-            if puede_enviar_alerta('gvm', config):
-                mensaje = formatear_mensaje_alerta('gvm_connection',
-                    {'message': 'GVM no responde correctamente'}, timestamp)
-                if enviar_telegram(mensaje, bot_token, chat_id, config_monitor):
-                    registrar_alerta_enviada('gvm')
-                    resultados['alerts_sent'].append('gvm')
-                    escribir_log("Alerta de GVM enviada por Telegram")
+            tiene_problemas = True
     
-    # Alerta de actualización de imagen
+    # Verificar actualización de imagen (solo si está habilitado)
     if monitoring_config.get('alert_on_image_update', True) and checks.get('image') == 'warning':
-        if puede_enviar_alerta('image', config):
-            mensaje = formatear_mensaje_alerta('image',
-                {'message': 'Actualización de imagen disponible'}, timestamp)
+        tiene_problemas = True
+    
+    # Enviar mensaje completo solo si hay problemas o si se quiere reportar estado OK
+    # Por ahora solo enviamos si hay problemas (para evitar spam cuando todo está OK)
+    if tiene_problemas:
+        # Verificar cooldown (usamos 'monitoring' como tipo único para el mensaje completo)
+        if puede_enviar_alerta('monitoring', config):
+            mensaje = formatear_mensaje_alerta_completo(resultados, config, timestamp)
             if enviar_telegram(mensaje, bot_token, chat_id, config_monitor):
-                registrar_alerta_enviada('image')
-                resultados['alerts_sent'].append('image')
-                escribir_log("Alerta de actualización de imagen enviada por Telegram")
+                registrar_alerta_enviada('monitoring')
+                resultados['alerts_sent'].append('monitoring')
+                escribir_log("Alerta completa enviada por Telegram")
 
 def main():
     """Función principal"""
