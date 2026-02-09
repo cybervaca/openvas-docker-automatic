@@ -447,26 +447,6 @@ def verificar_gvm_connection(config):
     except Exception as e:
         return {'status': 'error', 'message': f'Error de conexión GVM: {str(e)}'}
 
-def verificar_actualizacion_imagen():
-    """Verifica si hay actualizaciones disponibles para la imagen Docker"""
-    try:
-        result = subprocess.run(
-            ['docker', 'pull', 'immauss/openvas:latest', '--dry-run'],
-            capture_output=True,
-            text=True,
-            timeout=60
-        )
-        
-        # Si hay output, significa que hay actualización disponible
-        if 'Image is up to date' in result.stdout or 'up to date' in result.stdout.lower():
-            return {'status': 'ok', 'message': 'Imagen actualizada'}
-        else:
-            return {'status': 'warning', 'message': 'Actualización de imagen disponible'}
-    except subprocess.TimeoutExpired:
-        return {'status': 'warning', 'message': 'Timeout al verificar actualización'}
-    except Exception as e:
-        return {'status': 'warning', 'message': f'Error al verificar actualización: {str(e)}'}
-
 def formatear_mensaje_alerta_completo(resultados, config, timestamp):
     """Formatea un mensaje completo con todas las alertas agrupadas"""
     pais = config.get('pais', 'N/A')
@@ -502,8 +482,7 @@ def formatear_mensaje_alerta_completo(resultados, config, timestamp):
         'docker': '🔧',
         'gvmd': '🛡️',
         'gsad': '🌐',
-        'gvm_connection': '🔌',
-        'image': '🔄'
+        'gvm_connection': '🔌'
     }
     
     # Nombres descriptivos
@@ -512,8 +491,7 @@ def formatear_mensaje_alerta_completo(resultados, config, timestamp):
         'docker': 'Docker Daemon',
         'gvmd': 'GVM (Puerto 9390)',
         'gsad': 'GSAD Web UI (Puerto 9392)',
-        'gvm_connection': 'Conexión GVM TLS',
-        'image': 'Actualización de Imagen'
+        'gvm_connection': 'Conexión GVM TLS'
     }
     
     # Mensajes de estado
@@ -571,8 +549,7 @@ def formatear_mensaje_alerta_completo(resultados, config, timestamp):
             'docker': "🔧 Docker: Verificar con 'systemctl status docker' y 'systemctl start docker'",
             'gvmd': "🛡️ GVM: Verificar logs con 'docker logs openvas'",
             'gsad': "🌐 GSAD: Verificar que el puerto 9392 esté accesible",
-            'gvm_connection': "🔌 Conexión: Verificar credenciales y que GVM esté funcionando",
-            'image': "🔄 Imagen: Considerar actualizar con 'docker pull immauss/openvas:latest'"
+            'gvm_connection': "🔌 Conexión: Verificar credenciales y que GVM esté funcionando"
         }
         
         for check_name, status in checks.items():
@@ -625,13 +602,6 @@ def ejecutar_verificaciones(config):
     if gvm_conn['status'] != 'ok':
         resultados['status'] = 'error' if gvm_conn['status'] == 'error' else resultados['status']
     
-    # Verificar actualización de imagen
-    imagen = verificar_actualizacion_imagen()
-    resultados['checks']['image'] = imagen['status']
-    escribir_log(f"Imagen Docker: {imagen['message']}")
-    if imagen['status'] == 'warning':
-        resultados['status'] = 'warning' if resultados['status'] == 'ok' else resultados['status']
-    
     return resultados
 
 def enviar_alertas(resultados, config):
@@ -675,10 +645,6 @@ def enviar_alertas(resultados, config):
     if monitoring_config.get('alert_on_gvm_down', True):
         if checks.get('gvmd') != 'ok' or checks.get('gvm_connection') != 'ok':
             tiene_problemas = True
-    
-    # Verificar actualización de imagen (solo si está habilitado)
-    if monitoring_config.get('alert_on_image_update', True) and checks.get('image') == 'warning':
-        tiene_problemas = True
     
     # Enviar mensaje completo solo si hay problemas o si se quiere reportar estado OK
     # Por ahora solo enviamos si hay problemas (para evitar spam cuando todo está OK)

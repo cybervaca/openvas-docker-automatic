@@ -84,9 +84,6 @@ def main():
             tiene_problemas = True
             print("   ✓ Problema detectado: gvm")
     
-    if monitoring_config.get('alert_on_image_update', True) and checks.get('image') == 'warning':
-        tiene_problemas = True
-        print("   ✓ Problema detectado: image")
     
     if not tiene_problemas:
         print("   ⚠️  No hay problemas detectados según configuración")
@@ -117,4 +114,6 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+
 
