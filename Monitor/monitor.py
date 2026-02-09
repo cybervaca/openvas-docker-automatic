@@ -16,6 +16,10 @@ import datetime
 import socket
 import requests
 import sys
+try:
+    import socks  # PySocks para soporte SOCKS5
+except ImportError:
+    socks = None
 from gvm.connections import TLSConnection
 from gvm.protocols.gmp import Gmp
 import xml.etree.ElementTree as ET
@@ -205,6 +209,9 @@ def enviar_telegram(mensaje, bot_token, chat_id, config_monitor=None):
     
     proxies = None
     if usar_proxy:
+        if socks is None:
+            escribir_log("PySocks no está instalado. Instala con: pip install PySocks", 'ERROR')
+            return False
         if crear_tunel_ssh_socks(config_monitor):
             socks_host = ssh_config.get('socks_host', '127.0.0.1')
             socks_port = ssh_config.get('socks_port', 1080)
