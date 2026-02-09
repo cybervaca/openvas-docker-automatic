@@ -8,6 +8,8 @@ Type=oneshot
 User=redteam
 Group=redteam
 WorkingDirectory=/opt/gvm/Monitor
+# Usar Python del sistema que tiene gvm instalado globalmente
+# Si el entorno virtual tiene gvm, cambiar a: /opt/gvm/gvm/bin/python3
 ExecStart=/usr/bin/python3 /opt/gvm/Monitor/monitor.py
 StandardOutput=journal
 StandardError=journal
@@ -15,6 +17,7 @@ SyslogIdentifier=openvas-monitor
 
 # Variables de entorno
 Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+# Python incluye /usr/lib/python3/dist-packages por defecto donde está instalado gvm
 
 # Reinicio en caso de fallo
 Restart=on-failure

@@ -246,11 +246,18 @@ else
     echo "Instala con: pip3 install requests"
 fi
 
-if python3 -c "from gvm.connections import TLSConnection" 2>/dev/null; then
-    echo -e "${GREEN}✓ python-gvm disponible${NC}"
+# Verificar python-gvm en el entorno virtual
+if [ -f "/opt/gvm/gvm/bin/python3" ]; then
+    if /opt/gvm/gvm/bin/python3 -c "from gvm.connections import TLSConnection" 2>/dev/null; then
+        echo -e "${GREEN}✓ python-gvm disponible en entorno virtual${NC}"
+    else
+        echo -e "${YELLOW}ADVERTENCIA: python-gvm no está instalado en entorno virtual${NC}"
+        echo "Instala con: /opt/gvm/gvm/bin/pip3 install python-gvm"
+        echo "O desde el directorio del proyecto: source /opt/gvm/gvm/bin/activate && pip3 install python-gvm"
+    fi
 else
-    echo -e "${YELLOW}ADVERTENCIA: python-gvm no está instalado${NC}"
-    echo "Instala con: pip3 install python-gvm"
+    echo -e "${YELLOW}ADVERTENCIA: Entorno virtual no encontrado en /opt/gvm/gvm/bin/python3${NC}"
+    echo "El servicio necesita el entorno virtual para funcionar correctamente"
 fi
 
 echo ""
