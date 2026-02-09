@@ -44,14 +44,11 @@ def leer_configuracion():
             configuracion = json.load(archivo)
             return configuracion
     except FileNotFoundError:
-        print(f"ERROR: El archivo '{CONFIG_PATH}' no se encontró.")
-        sys.exit(1)
+        raise FileNotFoundError(f"El archivo '{CONFIG_PATH}' no se encontró.")
     except json.JSONDecodeError as e:
-        print(f"ERROR: Error al decodificar el archivo JSON: {e}")
-        sys.exit(1)
+        raise ValueError(f"Error al decodificar el archivo JSON: {e}")
     except Exception as e:
-        print(f"ERROR: Ocurrió un error al leer configuración: {e}")
-        sys.exit(1)
+        raise Exception(f"Error al leer configuración: {e}")
 
 def leer_configuracion_monitor():
     """Lee la configuración específica del monitor desde Monitor/config.json"""
