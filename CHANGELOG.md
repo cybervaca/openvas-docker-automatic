@@ -1,5 +1,45 @@
 # Changelog
 
+## [2.5.0] - 2026-02-09
+
+### Añadido
+- **Servicio de Monitoreo OpenVAS** (`Monitor/`)
+  - Script principal `monitor.py` con verificaciones completas:
+    - Estado del contenedor Docker
+    - Servicio Docker daemon
+    - Puertos GVM (9390, 9392)
+    - Conexión TLS a GVM
+    - Detección de actualizaciones de imagen
+  - Alertas por Telegram con formato estructurado y emojis
+  - Logs estructurados en JSON (`/opt/gvm/logs/monitoring/`)
+  - Sistema de cooldown para evitar spam de alertas
+  - Ejecución automática cada 5 minutos mediante systemd timer
+  - Script helper `get_channel_id.py` para obtener chat_id de canales y grupos
+  - Documentación completa en `Monitor/README.md`
+  - Script de instalación `install-monitor.sh`
+
+### Mejorado
+- `Config/config_example.json` - Añadida sección `monitoring` con configuración completa
+  - Opciones para habilitar/deshabilitar tipos de alertas
+  - Configuración de Telegram (bot_token, chat_id)
+  - Sistema de cooldown configurable
+- `Reports/get-reports.py`, `get-reports-os.py`, `get-reports-unico.py`
+  - Migración de Unix Socket a TLS Connection (puerto 9390)
+  - Actualización de rutas a `/opt/gvm/`
+  - Supresión de warnings de deprecación
+  - Corrección de path duplicado en mensajes
+  - Soporte para PostgreSQL dentro de contenedor Docker
+
+### Corregido
+- Path duplicado en mensajes de reportes: `/opt/gvm/Reports/exports/exports/` → `/opt/gvm/Reports/exports/`
+- Warnings de deprecación suprimidos en scripts de reportes
+- Conexión a PostgreSQL desde scripts ejecutados fuera del contenedor Docker
+
+### Documentación
+- `README.md` - Actualizado con información del servicio de monitoreo
+- `Monitor/README.md` - Documentación completa del servicio
+- `Reports/README.md` - Documentación actualizada con nuevas rutas y TLS
+
 ## [2.4.0] - 2026-01-30
 
 ### Añadido
