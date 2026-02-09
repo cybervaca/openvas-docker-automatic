@@ -83,6 +83,16 @@ else
     fi
 fi
 
+# Verificar configuración del túnel SSH (opcional)
+MONITOR_CONFIG_FILE="/opt/gvm/Monitor/config.json"
+if [ -f "$MONITOR_CONFIG_FILE" ]; then
+    echo -e "${GREEN}✓ Configuración de túnel SSH encontrada (opcional)${NC}"
+else
+    echo -e "${YELLOW}ℹ️  Configuración de túnel SSH no encontrada (opcional)${NC}"
+    echo "   Si Telegram está bloqueado, crea $MONITOR_CONFIG_FILE"
+    echo "   Si Telegram no está bloqueado, no es necesario este archivo"
+fi
+
 # Recargar systemd
 echo -e "${YELLOW}Recargando systemd...${NC}"
 systemctl daemon-reload

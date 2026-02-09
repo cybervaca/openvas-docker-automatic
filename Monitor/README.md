@@ -73,7 +73,9 @@ Antes de instalar el servicio, necesitas crear un bot de Telegram:
 
 ### 2. Configurar Túnel SSH SOCKS (Opcional - Solo si Telegram está bloqueado)
 
-Si Telegram está bloqueado por firewall corporativo, puedes usar un túnel SSH SOCKS a través de tu VPS:
+**IMPORTANTE:** El archivo `/opt/gvm/Monitor/config.json` es completamente opcional. Si no existe, el servicio funcionará normalmente sin túnel SOCKS, conectándose directamente a Telegram.
+
+Si Telegram está bloqueado por firewall corporativo, puedes crear este archivo para usar un túnel SSH SOCKS a través de tu VPS:
 
 **Requisitos previos:**
 - Tu clave SSH pública debe estar en `~/.ssh/authorized_keys` del usuario en el VPS
@@ -104,10 +106,12 @@ Si Telegram está bloqueado por firewall corporativo, puedes usar un túnel SSH 
 - `socks_port`: Puerto local para el proxy SOCKS (1080 por defecto)
 - `socks_host`: Host local para el proxy SOCKS (127.0.0.1 por defecto)
 
-**Nota:** 
+**Notas importantes:** 
+- **El archivo es opcional:** Si `/opt/gvm/Monitor/config.json` no existe, el servicio funcionará sin túnel SOCKS
 - El túnel se crea bajo demanda (solo cuando se necesita enviar una alerta) y se cierra automáticamente después
 - Si `ssh_key_path` es `null` o no se especifica, se usará la clave SSH por defecto del usuario (normalmente `/root/.ssh/id_rsa`)
 - Asegúrate de que la clave pública esté en el `authorized_keys` del VPS antes de usar el servicio
+- Si no necesitas túnel SOCKS (Telegram no está bloqueado), simplemente no crees este archivo
 
 ### 3. Configurar config.json
 
