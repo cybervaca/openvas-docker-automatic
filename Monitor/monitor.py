@@ -723,7 +723,16 @@ def main():
         escribir_log("Iniciando verificación de monitoreo")
         
         # Leer configuración
-        config = leer_configuracion()
+        try:
+            config = leer_configuracion()
+        except PermissionError as e:
+            escribir_log(f"ERROR: No se puede leer configuración por permisos: {e}", 'ERROR')
+            print(f"ERROR: Permisos insuficientes para leer {CONFIG_PATH}")
+            print(f"Verifica que el usuario tenga permisos de lectura en el archivo")
+            sys.exit(1)
+        except Exception as e:
+            escribir_log(f"ERROR: Error al leer configuración: {e}", 'ERROR')
+            sys.exit(1)
         
         # Verificar si el monitoreo está habilitado
         monitoring_config = config.get('monitoring', {})
@@ -738,16 +747,22 @@ def main():
         enviar_alertas(resultados, config)
         
         # Guardar resultado en log estructurado
-        os.makedirs(LOG_DIR, exist_ok=True)
-        log_entry = {
-            'timestamp': resultados['timestamp'],
-            'status': resultados['status'],
-            'checks': resultados['checks'],
-            'alerts_sent': len(resultados['alerts_sent']) > 0
-        }
-        
-        with open(LOG_FILE, 'a') as f:
-            f.write(json.dumps(log_entry) + '\n')
+        try:
+            os.makedirs(LOG_DIR, exist_ok=True, mode=0o755)
+            log_entry = {
+                'timestamp': resultados['timestamp'],
+                'status': resultados['status'],
+                'checks': resultados['checks'],
+                'alerts_sent': len(resultados['alerts_sent']) > 0
+            }
+            
+            with open(LOG_FILE, 'a') as f:
+                f.write(json.dumps(log_entry) + '\n')
+        except PermissionError as e:
+            escribir_log(f"ADVERTENCIA: No se puede escribir log por permisos: {e}", 'WARNING')
+            print(f"ADVERTENCIA: Permisos insuficientes para escribir en {LOG_FILE}")
+        except Exception as e:
+            escribir_log(f"ADVERTENCIA: Error al escribir log: {e}", 'WARNING')
         
         escribir_log(f"Verificación completada. Estado: {resultados['status']}")
         
