@@ -1,7 +1,7 @@
 import pandas as pd
 import getpass
 import xml.etree.ElementTree as ET
-from gvm.connections import UnixSocketConnection
+from gvm.connections import TLSConnection
 from gvm.protocols.gmp import Gmp
 from gvm.xml import pretty_print
 import untangle
@@ -18,13 +18,13 @@ from email.mime.base import MIMEBase
 from email import encoders
 import ipaddress
 
-REPORTS_DIR = "/home/redteam/gvm/Reports"
+REPORTS_DIR = "/opt/gvm/Reports"
 CSV_FILE = os.path.join(REPORTS_DIR, "exclusion.csv")
 
 # Función para leer la configuración
 def leer_configuracion():
     try:
-        with open('/home/redteam/gvm/Config/config.json', 'r') as archivo:
+        with open('/opt/gvm/Config/config.json', 'r') as archivo:
             configuracion = json.load(archivo)
             return configuracion
     except FileNotFoundError:
@@ -84,13 +84,13 @@ def get_pass():
 
 # Función para conectarse a GVM
 def connect_gvm():
-    path = "/run/gvmd/gvmd.sock"
-    connection = UnixSocketConnection(path=path, timeout=600)
+    # Conexión TLS a GVM
+    connection = TLSConnection(hostname="127.0.0.1", port=9390)
     return connection
 
 # Función para preparar el reporte
 def ready_report(connection, user, password, reportformat, host):
-    export = "/home/redteam/gvm/Reports/exports"
+    export = "/opt/gvm/Reports/exports"
     files = []
     with Gmp(connection=connection) as gmp:
         response = gmp.get_version()
@@ -202,13 +202,13 @@ def delete_duplicates(files, export, host):
     
     #solo para la externa
     #print("Lanzamos subida a balbix")
-    #subprocess.run(["python3", "/home/redteam/gvm/Reports/upload-reports.py"] + [file_unif])
+    #subprocess.run(["python3", "/opt/gvm/Reports/upload-reports.py"] + [file_unif])
     #fin externa
     #enviamos sharepoint
-    subprocess.run(["python3", "/home/redteam/gvm/Reports/subida_share.py", "-f", file_unif, 
+    subprocess.run(["python3", "/opt/gvm/Reports/subida_share.py", "-f", file_unif, 
     "-p", pais, 
     "-a", 'Openvas_Interno'])
-    subprocess.run(["python3", "/home/redteam/gvm/Reports/subida_share.py", "-f", file_excel,  
+    subprocess.run(["python3", "/opt/gvm/Reports/subida_share.py", "-f", file_excel,  
     "-p", pais,
     "-a", 'Openvas_Interno'])
     separar_cve(file_unif)
@@ -223,7 +223,7 @@ def separar_cve(nombre_archivo):
         sin_info.to_csv(nombre_archivo.replace('.csv', '_Misconfigs.csv'), index=False)
         ficheros = [nombre_archivo.replace('.csv', '_CVE.csv'), nombre_archivo.replace('.csv', '_Misconfigs.csv')]
         print("Ya no sube a Balbix, se mantiene para la subida a Valbix")
-        subprocess.run(["python3", "/home/redteam/gvm/Reports/upload-reports.py"] + ficheros)
+        subprocess.run(["python3", "/opt/gvm/Reports/upload-reports.py"] + ficheros)
     except pd.errors.ParserError as pe:
         print(f"Error de análisis al procesar el archivo CSV: {pe}")
     except Exception as e:
@@ -350,7 +350,7 @@ def determinar_severidad(cvss):
         return 'Info'
 
 def vulns_ip(vulns, host):
-    export = '/home/redteam/gvm/Reports/exports/vulns_host'
+    export = '/opt/gvm/Reports/exports/vulns_host'
     now = datetime.datetime.now()
     year = now.year
     month = now.month
@@ -362,7 +362,7 @@ def vulns_ip(vulns, host):
     df_ips = pd.read_csv(vulns)
     df_sistemas = pd.read_csv(host)
     sistemas_operativos = []
-    #rangos_ip = cargar_rangos_ip('/home/redteam/gvm/Targets_Tasks/openvas_externa.csv')  # Cambia esta ruta al archivo CSV con los rangos de IP y países
+    #rangos_ip = cargar_rangos_ip('/opt/gvm/Targets_Tasks/openvas_externa.csv')  # Cambia esta ruta al archivo CSV con los rangos de IP y países
     paises = []
     severidades = []
     regiones = []
@@ -456,12 +456,12 @@ def get_tasks_and_exclusions(connection, user, password, pais):
                     writer.writeheader()
                 writer.writerows(new_records)
                 
-        subprocess.run(["python3", "/home/redteam/gvm/Reports/subida_share.py", "-f", CSV_FILE, 
+        subprocess.run(["python3", "/opt/gvm/Reports/subida_share.py", "-f", CSV_FILE, 
         "-p", pais, 
         "-a", 'Openvas_Interno'])
 
 if __name__ == "__main__":
-    dir_csv = '/home/redteam/gvm/Reports/exports/'
+    dir_csv = '/opt/gvm/Reports/exports/'
     csv_files = glob.glob(os.path.join(dir_csv, '*.csv'))
     for csv_file in csv_files:
         try:
@@ -470,7 +470,7 @@ if __name__ == "__main__":
         except OSError as e:
             print(f'Error al borrar el archivo {csv_file}: {e.strerror}')
     origen = '/tmp/hosts.csv'
-    destino = '/home/redteam/gvm/Reports/hosts.csv'
+    destino = '/opt/gvm/Reports/hosts.csv'
     configuracion = leer_configuracion()
     username = configuracion.get('user')
     password = configuracion.get('password')

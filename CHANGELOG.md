@@ -1,5 +1,22 @@
 # Changelog
 
+## [2.5.3] - 2026-02-19
+
+### Corregido
+- **Conexión GVM en get-reports-test.py** - Corregido tipo de conexión
+  - Cambiado de `UnixSocketConnection` a `TLSConnection` para compatibilidad con Docker
+  - Actualizado `connect_gvm()` para usar puerto TLS 9390 en lugar de socket Unix
+  - Corregidas todas las rutas hardcodeadas de `/home/redteam/gvm/` a `/opt/gvm/`
+  - El script ahora puede conectarse correctamente a GVM y generar reportes
+
+### Cambios Técnicos
+- `Reports/get-reports-test.py`:
+  - Import cambiado de `UnixSocketConnection` a `TLSConnection`
+  - Función `connect_gvm()` actualizada para usar `TLSConnection(hostname="127.0.0.1", port=9390)`
+  - Actualizadas 12 rutas de `/home/redteam/gvm/` a `/opt/gvm/`:
+    - `REPORTS_DIR`, `config.json`, `exports`, `subida_share.py`, `upload-reports.py`, `hosts.csv`
+  - Consistencia con otros scripts del proyecto (`run-task.py`, `get-reports.py`, etc.)
+
 ## [2.5.2] - 2026-02-19
 
 ### Eliminado
