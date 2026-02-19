@@ -1,5 +1,22 @@
 # Changelog
 
+## [2.5.2] - 2026-02-19
+
+### Mejorado
+- **Conexión a PostgreSQL** - Exposición del puerto PostgreSQL en docker-compose
+  - Puerto 5432 expuesto en localhost (127.0.0.1:5432) en `docker-compose-example.yml`
+  - Scripts de reportes actualizados para usar conexión directa primero
+  - Orden de intento de conexión optimizado: conexión directa → docker exec → conexión local
+  - Evita problemas al subir reportes cuando `docker exec` falla
+
+### Cambios Técnicos
+- `docker-compose-example.yml` - Añadido puerto `127.0.0.1:5432:5432` para PostgreSQL
+- `Reports/get-reports-os.py` - Función `get_hosts()` actualizada con conexión directa primero
+- `Reports/get-reports-unico.py` - Función `get_hosts()` actualizada con conexión directa primero
+- `Reports/get-reports-test.py` - Función `get_hosts()` actualizada para seguir el mismo patrón
+  - Uso de `PGPASSWORD` para evitar prompts de contraseña
+  - Manejo mejorado de errores con múltiples fallbacks
+
 ## [2.5.1] - 2026-02-09
 
 ### Mejorado

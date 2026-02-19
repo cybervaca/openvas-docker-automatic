@@ -218,7 +218,7 @@ def get_reportformat(connection, username, password):
 def get_hosts(origen, destino):
     """
     Extrae información de hosts y sistemas operativos desde PostgreSQL.
-    Intenta primero con docker exec, luego con conexión local.
+    Intenta primero conexión directa localhost:5432, luego docker exec, luego conexión local.
     """
     if os.path.exists(origen):
         comando = f'rm -f {origen}'
@@ -226,7 +226,27 @@ def get_hosts(origen, destino):
     if os.path.exists(destino):
         os.remove(destino)
     
-    # Intentar con docker exec primero (PostgreSQL dentro del contenedor)
+    # 1. Intentar conexión directa a localhost:5432 (puerto expuesto del contenedor)
+    comando_directo = f"""
+    psql -h 127.0.0.1 -U postgres -d gvmd -c \
+    "\\copy (SELECT DISTINCT hosts.name AS IP, oss.name AS sistema_operativo \
+    FROM host_oss \
+    JOIN hosts ON host_oss.host = hosts.id \
+    JOIN oss ON host_oss.os = oss.id) TO '{origen}' WITH CSV HEADER;"
+    """
+    
+    # Configurar PGPASSWORD para evitar prompt de contraseña
+    env = os.environ.copy()
+    env['PGPASSWORD'] = 'admin'  # Contraseña por defecto del contenedor OpenVAS
+    
+    result_directo = subprocess.run(comando_directo, shell=True, capture_output=True, text=True, env=env)
+    
+    if result_directo.returncode == 0 and os.path.exists(origen):
+        shutil.copyfile(origen, destino)
+        print(f"✓ Información de hosts extraída exitosamente desde PostgreSQL (conexión directa)")
+        return
+    
+    # 2. Fallback: intentar con docker exec (PostgreSQL dentro del contenedor)
     comando_docker = f"""
     docker exec openvas sudo -u postgres psql -U postgres -d gvmd -c \
     "\\copy (SELECT DISTINCT hosts.name AS IP, oss.name AS sistema_operativo \
@@ -241,26 +261,28 @@ def get_hosts(origen, destino):
         # Copiar el archivo desde el contenedor
         subprocess.run(f"docker cp openvas:/tmp/hosts.csv {destino}", shell=True)
         print(f"✓ Información de hosts extraída exitosamente desde el contenedor")
-    else:
-        # Fallback: intentar conexión local (si PostgreSQL está disponible localmente)
-        comando_postgresql = f"""
-        sudo -u postgres -H sh -c "psql -U postgres -d gvmd -c \
-        '\\copy (SELECT DISTINCT hosts.name AS IP, oss.name AS sistema_operativo \
-        FROM host_oss \
-        JOIN hosts ON host_oss.host = hosts.id \
-        JOIN oss ON host_oss.os = oss.id) TO '{origen}' WITH CSV HEADER;'"
-        """
-        result_local = subprocess.run(comando_postgresql, shell=True, capture_output=True, text=True)
-        
-        if result_local.returncode == 0:
-            shutil.copyfile(origen, destino)
-            print(f"✓ Información de hosts extraída exitosamente desde PostgreSQL local")
-        else:
-            print(f"⚠ No se pudo extraer información de SO desde PostgreSQL")
-            print(f"  Los reportes se generarán sin información de sistema operativo")
-            # Crear archivo vacío con headers
-            with open(destino, 'w') as f:
-                f.write("ip,sistema_operativo\n")
+        return
+    
+    # 3. Fallback: intentar conexión local (si PostgreSQL está disponible localmente)
+    comando_postgresql = f"""
+    sudo -u postgres -H sh -c "psql -U postgres -d gvmd -c \
+    '\\copy (SELECT DISTINCT hosts.name AS IP, oss.name AS sistema_operativo \
+    FROM host_oss \
+    JOIN hosts ON host_oss.host = hosts.id \
+    JOIN oss ON host_oss.os = oss.id) TO '{origen}' WITH CSV HEADER;'"
+    """
+    result_local = subprocess.run(comando_postgresql, shell=True, capture_output=True, text=True)
+    
+    if result_local.returncode == 0:
+        shutil.copyfile(origen, destino)
+        print(f"✓ Información de hosts extraída exitosamente desde PostgreSQL local")
+        return
+    
+    # 4. Si todo falla, crear archivo vacío con headers
+    print(f"⚠ No se pudo extraer información de SO desde PostgreSQL")
+    print(f"  Los reportes se generarán sin información de sistema operativo")
+    with open(destino, 'w') as f:
+        f.write("ip,sistema_operativo\n")
 
 # Función para cargar rangos de IP y países desde un archivo CSV
 def cargar_rangos_ip(archivo):
