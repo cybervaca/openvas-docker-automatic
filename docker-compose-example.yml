@@ -29,10 +29,6 @@ services:
       - TZ=Europe/Madrid
       - SKIPSYNC=true
 
-    # Autoheal solo reinicia contenedores con esta label
-    labels:
-      - autoheal=true
-
     # Healthcheck real: valida procesos clave + web
     # (usa curl si existe, si no usa wget; si no hay ninguno, falla)
     healthcheck:
@@ -53,17 +49,6 @@ services:
 
     # Prioridad baja para el OOM killer
     oom_score_adj: -500
-
-  autoheal:
-    image: willfarrell/autoheal
-    container_name: autoheal
-    restart: unless-stopped
-    environment:
-      - AUTOHEAL_INTERVAL=30
-      - AUTOHEAL_START_PERIOD=120
-      - AUTOHEAL_ONLY_LABEL=true
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
 
 volumes:
   openvas-data:

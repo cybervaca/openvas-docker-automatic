@@ -2,6 +2,12 @@
 
 ## [2.5.2] - 2026-02-19
 
+### Eliminado
+- **Servicio autoheal** - Removido `willfarrell/autoheal` del docker-compose
+  - El servicio de monitoreo OpenVAS (`Monitor/`) ahora reemplaza la funcionalidad de autoheal
+  - Eliminada label `autoheal=true` del servicio openvas
+  - El servicio de monitoreo proporciona funcionalidad más completa con alertas por Telegram
+
 ### Mejorado
 - **Conexión a PostgreSQL** - Exposición del puerto PostgreSQL en docker-compose
   - Puerto 5432 expuesto en localhost (127.0.0.1:5432) en `docker-compose-example.yml`
@@ -10,7 +16,10 @@
   - Evita problemas al subir reportes cuando `docker exec` falla
 
 ### Cambios Técnicos
-- `docker-compose-example.yml` - Añadido puerto `127.0.0.1:5432:5432` para PostgreSQL
+- `docker-compose-example.yml`:
+  - Añadido puerto `127.0.0.1:5432:5432` para PostgreSQL
+  - Eliminado servicio `autoheal` (reemplazado por servicio de monitoreo)
+  - Eliminada label `autoheal=true` del servicio openvas
 - `Reports/get-reports-os.py` - Función `get_hosts()` actualizada con conexión directa primero
 - `Reports/get-reports-unico.py` - Función `get_hosts()` actualizada con conexión directa primero
 - `Reports/get-reports-test.py` - Función `get_hosts()` actualizada para seguir el mismo patrón
