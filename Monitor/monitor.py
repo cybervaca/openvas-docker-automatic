@@ -450,7 +450,7 @@ def verificar_gvm_connection(config):
 def verificar_feeds(config, feed_stale_days=30):
     """
     Verifica la fecha de última actualización de los feeds de OpenVAS.
-    Verifica directamente los archivos de feeds en el contenedor Docker.
+    Consulta la base de datos PostgreSQL de GVM para obtener información de feeds.
     
     Args:
         config: Configuración del sistema
@@ -464,92 +464,129 @@ def verificar_feeds(config, feed_stale_days=30):
         feeds_info = {}
         feeds_stale = []
         
-        # Verificar que el contenedor existe y está corriendo
-        try:
+        # Mapeo de tipos de feeds a nombres en la base de datos
+        feed_types = {
+            'NVT': 'NVT',
+            'SCAP': 'SCAP',
+            'CERT': 'CERT',
+            'GVMD_DATA': 'GVMD_DATA'
+        }
+        
+        # Consulta SQL para obtener información de feeds desde la tabla info
+        # La tabla info contiene información sobre feeds con campos como type, name, value
+        sql_query = """
+        SELECT type, name, value 
+        FROM info 
+        WHERE type IN ('NVT', 'SCAP', 'CERT', 'GVMD_DATA')
+        ORDER BY type, name;
+        """
+        
+        # Intentar conexión directa a PostgreSQL (puerto 5432 expuesto)
+        env = os.environ.copy()
+        env['PGPASSWORD'] = 'admin'  # Contraseña por defecto del contenedor OpenVAS
+        
+        comando_directo = f"""psql -h 127.0.0.1 -U postgres -d gvmd -t -A -F'|' -c "{sql_query}" """
+        
+        result = subprocess.run(
+            comando_directo,
+            shell=True,
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=10
+        )
+        
+        # Si falla conexión directa, intentar con docker exec
+        if result.returncode != 0:
+            comando_docker = f"""docker exec {CONTAINER_NAME} sudo -u postgres psql -U postgres -d gvmd -t -A -F'|' -c "{sql_query}" """
             result = subprocess.run(
-                ['docker', 'ps', '--filter', f'name={CONTAINER_NAME}', '--format', '{{.Names}}'],
+                comando_docker,
+                shell=True,
                 capture_output=True,
                 text=True,
                 timeout=10
             )
-            if CONTAINER_NAME not in result.stdout:
-                return {'status': 'error', 'message': 'Contenedor Docker no está corriendo', 'details': {}}
-        except Exception as e:
-            escribir_log(f"Error al verificar contenedor: {e}", 'ERROR')
-            return {'status': 'error', 'message': f'Error al verificar contenedor: {str(e)}', 'details': {}}
         
-        # Rutas de directorios de feeds dentro del contenedor Docker
-        # Verificamos la fecha de modificación del directorio o archivos dentro
-        feed_dirs = {
-            'NVT': '/var/lib/openvas/plugins',
-            'SCAP': '/var/lib/gvm/scap-data',
-            'CERT': '/var/lib/gvm/cert-data',
-            'GVMD_DATA': '/var/lib/gvm/data-objects'
-        }
+        if result.returncode != 0:
+            escribir_log(f"Error al consultar PostgreSQL: {result.stderr}", 'ERROR')
+            return {
+                'status': 'error',
+                'message': f'Error al consultar base de datos: {result.stderr[:100]}',
+                'details': {}
+            }
         
-        # Archivos alternativos que pueden indicar última actualización
-        feed_alt_files = {
-            'NVT': ['/var/lib/openvas/plugins/feed-update.lock', '/var/lib/openvas/plugins/.timestamp'],
-            'SCAP': ['/var/lib/gvm/scap-data/feed-update.lock', '/var/lib/gvm/scap-data/.timestamp'],
-            'CERT': ['/var/lib/gvm/cert-data/feed-update.lock', '/var/lib/gvm/cert-data/.timestamp'],
-            'GVMD_DATA': ['/var/lib/gvm/data-objects/feed-update.lock', '/var/lib/gvm/data-objects/.timestamp']
-        }
+        # Parsear resultados de la consulta
+        # Formato: type|name|value
+        feed_data = {}
+        for line in result.stdout.strip().split('\n'):
+            if not line or '|' not in line:
+                continue
+            parts = line.split('|', 2)
+            if len(parts) >= 3:
+                feed_type = parts[0].strip()
+                name = parts[1].strip()
+                value = parts[2].strip()
+                
+                if feed_type not in feed_data:
+                    feed_data[feed_type] = {}
+                feed_data[feed_type][name] = value
         
-        # Verificar cada feed usando docker exec
-        for feed_name, feed_dir in feed_dirs.items():
+        # Buscar información de última actualización para cada feed
+        for feed_name, feed_type in feed_types.items():
             fecha_actualizacion = None
-            archivo_usado = None
             
-            # Intentar primero con archivos alternativos
-            for alt_file in feed_alt_files.get(feed_name, []):
-                try:
-                    result = subprocess.run(
-                        ['docker', 'exec', CONTAINER_NAME, 'stat', '-c', '%Y', alt_file],
-                        capture_output=True,
-                        text=True,
-                        timeout=10
-                    )
-                    
-                    if result.returncode == 0 and result.stdout.strip():
+            if feed_type in feed_data:
+                feed_info = feed_data[feed_type]
+                
+                # Buscar campos que contengan información de fecha
+                # Campos comunes: 'last_update', 'update', 'timestamp', 'modified'
+                for date_field in ['last_update', 'update', 'timestamp', 'modified', 'last_modified']:
+                    if date_field in feed_info:
+                        fecha_str = feed_info[date_field]
                         try:
-                            timestamp = int(result.stdout.strip())
-                            fecha_actualizacion = datetime.datetime.fromtimestamp(timestamp)
-                            archivo_usado = alt_file
+                            # Intentar parsear diferentes formatos de fecha
+                            if 'T' in fecha_str:
+                                # Formato ISO 8601
+                                fecha_str_clean = fecha_str.replace('Z', '+00:00')
+                                fecha_actualizacion = datetime.datetime.fromisoformat(fecha_str_clean)
+                            elif fecha_str.isdigit():
+                                # Timestamp Unix
+                                timestamp = int(fecha_str)
+                                fecha_actualizacion = datetime.datetime.fromtimestamp(timestamp)
+                            else:
+                                # Formato: YYYY-MM-DD HH:MM:SS
+                                fecha_actualizacion = datetime.datetime.strptime(fecha_str, '%Y-%m-%d %H:%M:%S')
                             break
-                        except ValueError:
+                        except:
                             continue
-                except:
-                    continue
+                
+                # Si no encontramos fecha en campos específicos, buscar en todos los valores
+                if fecha_actualizacion is None:
+                    for key, value in feed_info.items():
+                        if 'date' in key.lower() or 'time' in key.lower() or 'update' in key.lower():
+                            try:
+                                if 'T' in value:
+                                    fecha_str_clean = value.replace('Z', '+00:00')
+                                    fecha_actualizacion = datetime.datetime.fromisoformat(fecha_str_clean)
+                                elif value.isdigit() and len(value) == 10:
+                                    fecha_actualizacion = datetime.datetime.fromtimestamp(int(value))
+                                break
+                            except:
+                                continue
             
-            # Si no encontramos archivo específico, usar fecha de modificación del directorio
-            if fecha_actualizacion is None:
-                try:
-                    result = subprocess.run(
-                        ['docker', 'exec', CONTAINER_NAME, 'stat', '-c', '%Y', feed_dir],
-                        capture_output=True,
-                        text=True,
-                        timeout=10
-                    )
-                    
-                    if result.returncode == 0 and result.stdout.strip():
-                        try:
-                            timestamp = int(result.stdout.strip())
-                            fecha_actualizacion = datetime.datetime.fromtimestamp(timestamp)
-                            archivo_usado = f"directorio {feed_dir}"
-                        except ValueError:
-                            pass
-                except:
-                    pass
-            
-            # Si encontramos fecha, calcular días
+            # Calcular días desde última actualización
             if fecha_actualizacion:
+                # Normalizar timezone si es necesario
+                if fecha_actualizacion.tzinfo is not None:
+                    fecha_actualizacion = fecha_actualizacion.replace(tzinfo=None)
+                
                 dias_desde_actualizacion = (fecha_actual - fecha_actualizacion).days
                 
                 feeds_info[feed_name] = {
                     'fecha': fecha_actualizacion.strftime('%Y-%m-%d %H:%M:%S'),
                     'dias': dias_desde_actualizacion,
                     'actualizado': dias_desde_actualizacion < feed_stale_days,
-                    'fuente': archivo_usado
+                    'fuente': 'PostgreSQL'
                 }
                 
                 if dias_desde_actualizacion >= feed_stale_days:
@@ -559,29 +596,14 @@ def verificar_feeds(config, feed_stale_days=30):
                         'fecha': fecha_actualizacion.strftime('%Y-%m-%d %H:%M:%S')
                     })
             else:
-                # No se pudo obtener fecha
+                # No se pudo obtener fecha desde la base de datos
                 feeds_info[feed_name] = {
-                    'fecha': 'No disponible',
+                    'fecha': 'No disponible en BD',
                     'dias': None,
                     'actualizado': None,
-                    'fuente': 'No encontrado'
+                    'fuente': 'PostgreSQL'
                 }
-                escribir_log(f"Feed {feed_name}: No se pudo obtener fecha de actualización", 'WARNING')
-                    
-            except subprocess.TimeoutExpired:
-                feeds_info[feed_name] = {
-                    'fecha': 'Timeout',
-                    'dias': None,
-                    'actualizado': None
-                }
-                escribir_log(f"Feed {feed_name}: Timeout al verificar", 'WARNING')
-            except Exception as e:
-                feeds_info[feed_name] = {
-                    'fecha': f'Error: {str(e)[:50]}',
-                    'dias': None,
-                    'actualizado': None
-                }
-                escribir_log(f"Feed {feed_name}: Error al verificar - {e}", 'WARNING')
+                escribir_log(f"Feed {feed_name}: No se encontró información de fecha en la base de datos", 'WARNING')
         
         # Determinar estado general
         if feeds_stale:
@@ -618,6 +640,9 @@ def verificar_feeds(config, feed_stale_days=30):
                 }
             }
                 
+    except subprocess.TimeoutExpired:
+        escribir_log("Timeout al consultar base de datos PostgreSQL", 'ERROR')
+        return {'status': 'error', 'message': 'Timeout al consultar base de datos', 'details': {}}
     except Exception as e:
         escribir_log(f"Error al verificar feeds: {e}", 'ERROR')
         import traceback
