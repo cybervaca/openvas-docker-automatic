@@ -50,9 +50,10 @@ El proyecto incluye un servicio de monitoreo completo que verifica:
 - Servicio Docker daemon
 - Servicios GVM (gvmd, gsad)
 - Conexión TLS a GVM
+- **Actualización de feeds de vulnerabilidades** (NVTs, SCAP, CERT, GVMD_DATA)
 - Actualizaciones de imagen disponibles
 
-**Alertas por Telegram**: Configura tu bot y recibe notificaciones proactivas.
+**Alertas por Telegram**: Configura tu bot y recibe notificaciones proactivas cuando hay problemas o feeds desactualizados (>30 días).
 
 Ver [Monitor/README.md](Monitor/README.md) para configuración completa.
 

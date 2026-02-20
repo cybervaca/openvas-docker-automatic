@@ -8,6 +8,7 @@ Servicio de monitoreo completo que verifica el estado del contenedor Docker, ser
 - ✅ Verificación del servicio Docker daemon
 - ✅ Verificación de servicios GVM (gvmd, gsad)
 - ✅ Verificación de conexión TLS a GVM
+- ✅ Verificación de actualización de feeds de vulnerabilidades
 - ✅ Detección de actualizaciones de imagen
 - ✅ Alertas por Telegram con formato estructurado
 - ✅ Logs estructurados en JSON
@@ -143,6 +144,8 @@ Edita `/opt/gvm/Config/config.json` y añade la sección `monitoring`:
 - `alert_on_docker_down`: Enviar alerta si Docker daemon está detenido (true/false)
 - `alert_on_gvm_down`: Enviar alerta si GVM no responde (true/false)
 - `alert_on_image_update`: Enviar alerta si hay actualización de imagen disponible (true/false)
+- `alert_on_feeds_stale`: Enviar alerta si los feeds están desactualizados (true/false)
+- `feed_stale_days`: Número de días sin actualizar para considerar un feed como desactualizado (default: 30)
 - `alert_cooldown`: Tiempo en segundos entre alertas del mismo tipo (3600 = 1 hora)
 - `telegram.bot_token`: Token del bot de Telegram obtenido de @BotFather
 - `telegram.chat_id`: Tu chat_id de Telegram
@@ -241,16 +244,40 @@ El servicio envía alertas formateadas con emojis para identificar el tipo:
 - 🛡️ **GVM (gvmd):** El puerto 9390 no responde
 - 🌐 **GSAD:** El puerto 9392 (web UI) no responde
 - 🔌 **Conexión GVM:** No se puede conectar a GVM vía TLS
+- 📦 **Feeds:** Los feeds de vulnerabilidades están desactualizados (>30 días)
 - 🔄 **Imagen:** Hay una actualización disponible para la imagen Docker
 
 ### Ejemplo de Mensaje
 
+**Alerta de Contenedor:**
 ```
 🐳 ALERTA: CONTAINER
 
 Estado: Contenedor no está corriendo
 Hora: 2024-01-15 10:30:00
 Acción: Verificar con 'docker ps -a' y 'docker start openvas'
+```
+
+**Alerta de Feeds Desactualizados:**
+```
+🟡 ADVERTENCIA: OpenVAS Monitor
+
+📦 FEEDS DESACTUALIZADOS:
+
+• NVT: 35 días sin actualizar
+  Última actualización: 2023-12-10 15:30:00
+
+• SCAP: 32 días sin actualizar
+  Última actualización: 2023-12-13 10:20:00
+
+Estado de todos los feeds:
+✅ GVMD_DATA: 5 días (Última: 2024-01-10 12:00:00)
+✅ CERT: 8 días (Última: 2024-01-07 14:30:00)
+⚠️ NVT: 35 días (Última: 2023-12-10 15:30:00)
+⚠️ SCAP: 32 días (Última: 2023-12-13 10:20:00)
+
+ACCIONES RECOMENDADAS:
+📦 Feeds: Ejecutar '/opt/gvm/Cron/actualiza_gvm.sh' o 'greenbone-feed-sync'
 ```
 
 ### Sistema de Cooldown
@@ -285,7 +312,13 @@ El servicio verifica los siguientes aspectos:
    - Autentica con las credenciales del config.json
    - Obtiene la versión de GVM
 
-6. **Actualización de Imagen:**
+6. **Feeds de Vulnerabilidades:**
+   - Verifica la fecha de última actualización de los feeds (NVTs, SCAP, CERT, GVMD_DATA)
+   - Usa el protocolo GMP para obtener información de feeds
+   - Calcula días desde última actualización
+   - Alerta si algún feed tiene más de 30 días sin actualizar (configurable con `feed_stale_days`)
+
+7. **Actualización de Imagen:**
    - Verifica si hay actualizaciones disponibles para `immauss/openvas:latest`
    - Usa `docker pull --dry-run`
 

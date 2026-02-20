@@ -1,5 +1,38 @@
 # Changelog
 
+## [2.5.4] - 2026-01-30
+
+### Añadido
+- **Verificación de Feeds en Servicio de Monitoreo** - Detección automática de feeds desactualizados
+  - Nueva función `verificar_feeds()` que obtiene fecha de actualización de feeds usando GMP
+  - Verifica NVTs, SCAP, CERT y GVMD_DATA
+  - Calcula días desde última actualización
+  - Alerta por Telegram si algún feed tiene más de 30 días sin actualizar (configurable)
+  - Muestra información detallada de feeds desactualizados en las alertas
+  - Integrado en el servicio de monitoreo existente
+
+### Mejorado
+- **Servicio de Monitoreo** - Verificación de feeds de vulnerabilidades
+  - Añadida verificación de feeds después de verificar conexión GVM
+  - Mensajes de alerta incluyen lista detallada de feeds desactualizados
+  - Estado de todos los feeds visible en las alertas
+  - Recomendación automática de ejecutar `actualiza_gvm.sh` cuando hay feeds desactualizados
+
+### Cambios Técnicos
+- `Monitor/monitor.py`:
+  - Nueva función `verificar_feeds(config, feed_stale_days=30)` que usa GMP `get_info()`
+  - Integrada en `ejecutar_verificaciones()` solo si GVM está conectado
+  - Actualizado `formatear_mensaje_alerta_completo()` para incluir información de feeds
+  - Añadida lógica de alertas para feeds en `enviar_alertas()`
+  - Añadido emoji 📦 y nombre "Feeds de Vulnerabilidades" en mensajes
+- `Config/config_example.json`:
+  - Añadida opción `alert_on_feeds_stale: true` en sección `monitoring`
+  - Añadida opción `feed_stale_days: 30` para configurar umbral de días
+- `Monitor/README.md`:
+  - Documentada nueva verificación de feeds
+  - Añadido ejemplo de mensaje de alerta para feeds desactualizados
+  - Actualizada lista de características y verificaciones
+
 ## [2.5.3] - 2026-02-19
 
 ### Corregido

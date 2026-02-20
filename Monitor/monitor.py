@@ -447,6 +447,182 @@ def verificar_gvm_connection(config):
     except Exception as e:
         return {'status': 'error', 'message': f'Error de conexión GVM: {str(e)}'}
 
+def verificar_feeds(config, feed_stale_days=30):
+    """
+    Verifica la fecha de última actualización de los feeds de OpenVAS.
+    Usa el comando get_info de GMP para obtener información de feeds.
+    
+    Args:
+        config: Configuración del sistema
+        feed_stale_days: Número de días para considerar un feed como desactualizado (default: 30)
+    
+    Returns:
+        dict: {'status': 'ok'|'warning'|'error', 'message': str, 'details': dict}
+    """
+    try:
+        username = config.get('user', 'admin')
+        password = config.get('password', '')
+        
+        if not password:
+            return {'status': 'warning', 'message': 'Password no configurado', 'details': {}}
+        
+        connection = TLSConnection(hostname="127.0.0.1", port=GVM_PORT)
+        
+        with Gmp(connection=connection) as gmp:
+            gmp.authenticate(username, password)
+            
+            # Obtener información de feeds usando get_info
+            try:
+                response = gmp.get_info()
+                root = ET.fromstring(response)
+                
+                # Verificar status de la respuesta
+                status = root.get("status")
+                if status != "200":
+                    return {'status': 'error', 'message': f'Error al obtener información de feeds (status: {status})', 'details': {}}
+                
+                # Buscar información de feeds en la respuesta
+                feeds_info = {}
+                feeds_stale = []
+                
+                # Buscar todos los elementos info que contengan información de feeds
+                info_elements = root.findall('.//info')
+                
+                # Tipos de feeds a verificar con sus posibles nombres
+                feed_types = {
+                    'NVT': ['NVT', 'NVTs', 'nvt'],
+                    'SCAP': ['SCAP', 'scap'],
+                    'CERT': ['CERT', 'cert'],
+                    'GVMD_DATA': ['GVMD_DATA', 'GVMD', 'gvmd_data', 'gvmd']
+                }
+                
+                fecha_actual = datetime.datetime.now()
+                
+                # Intentar obtener información de cada tipo de feed
+                for feed_name, posibles_nombres in feed_types.items():
+                    feed_encontrado = False
+                    
+                    # Buscar en los elementos info
+                    for info_elem in info_elements:
+                        # Buscar por tipo o nombre
+                        tipo = info_elem.get('type', '').upper()
+                        name_elem = info_elem.find('name')
+                        name_text = (name_elem.text.upper() if name_elem is not None and name_elem.text else '')
+                        
+                        # Verificar si este elemento corresponde al feed que buscamos
+                        if any(nombre in tipo or nombre in name_text for nombre in posibles_nombres):
+                            feed_encontrado = True
+                            
+                            # Buscar fecha de actualización en diferentes campos posibles
+                            fecha_actualizacion = None
+                            
+                            # Intentar diferentes campos de fecha
+                            for fecha_field in ['update', 'last_update', 'timestamp', 'modified', 'last_modified']:
+                                fecha_elem = info_elem.find(fecha_field)
+                                if fecha_elem is not None and fecha_elem.text:
+                                    fecha_str = fecha_elem.text.strip()
+                                    
+                                    # Intentar parsear la fecha en diferentes formatos
+                                    try:
+                                        # Formato ISO 8601: 2024-01-15T10:30:00Z o 2024-01-15T10:30:00+00:00
+                                        if 'T' in fecha_str:
+                                            fecha_str_clean = fecha_str.replace('Z', '+00:00')
+                                            fecha_actualizacion = datetime.datetime.fromisoformat(fecha_str_clean)
+                                        # Formato timestamp Unix
+                                        elif fecha_str.isdigit():
+                                            timestamp = int(fecha_str)
+                                            fecha_actualizacion = datetime.datetime.fromtimestamp(timestamp)
+                                        # Formato: YYYY-MM-DD HH:MM:SS
+                                        else:
+                                            fecha_actualizacion = datetime.datetime.strptime(fecha_str, '%Y-%m-%d %H:%M:%S')
+                                        
+                                        if fecha_actualizacion:
+                                            break
+                                    except:
+                                        continue
+                            
+                            if fecha_actualizacion:
+                                # Calcular días desde última actualización
+                                # Normalizar timezone si es necesario
+                                if fecha_actualizacion.tzinfo is not None:
+                                    fecha_actualizacion = fecha_actualizacion.replace(tzinfo=None)
+                                
+                                dias_desde_actualizacion = (fecha_actual - fecha_actualizacion).days
+                                
+                                feeds_info[feed_name] = {
+                                    'fecha': fecha_actualizacion.strftime('%Y-%m-%d %H:%M:%S'),
+                                    'dias': dias_desde_actualizacion,
+                                    'actualizado': dias_desde_actualizacion < feed_stale_days
+                                }
+                                
+                                if dias_desde_actualizacion >= feed_stale_days:
+                                    feeds_stale.append({
+                                        'nombre': feed_name,
+                                        'dias': dias_desde_actualizacion,
+                                        'fecha': fecha_actualizacion.strftime('%Y-%m-%d %H:%M:%S')
+                                    })
+                            else:
+                                # No se pudo obtener fecha
+                                feeds_info[feed_name] = {
+                                    'fecha': 'No disponible',
+                                    'dias': None,
+                                    'actualizado': None
+                                }
+                            break
+                    
+                    if not feed_encontrado:
+                        # Feed no encontrado en la respuesta
+                        feeds_info[feed_name] = {
+                            'fecha': 'No encontrado',
+                            'dias': None,
+                            'actualizado': None
+                        }
+                
+                # Determinar estado general
+                if feeds_stale:
+                    mensaje = f"{len(feeds_stale)} feed(s) desactualizado(s) (>{feed_stale_days} días)"
+                    return {
+                        'status': 'warning',
+                        'message': mensaje,
+                        'details': {
+                            'feeds_stale': feeds_stale,
+                            'all_feeds': feeds_info,
+                            'stale_days': feed_stale_days
+                        }
+                    }
+                elif any(feed.get('actualizado') is None for feed in feeds_info.values()):
+                    # Algunos feeds no se pudieron verificar
+                    return {
+                        'status': 'warning',
+                        'message': 'No se pudo verificar todos los feeds',
+                        'details': {
+                            'feeds_stale': [],
+                            'all_feeds': feeds_info,
+                            'stale_days': feed_stale_days
+                        }
+                    }
+                else:
+                    # Todos los feeds están actualizados
+                    return {
+                        'status': 'ok',
+                        'message': f'Todos los feeds actualizados (<{feed_stale_days} días)',
+                        'details': {
+                            'feeds_stale': [],
+                            'all_feeds': feeds_info,
+                            'stale_days': feed_stale_days
+                        }
+                    }
+                    
+            except Exception as e:
+                escribir_log(f"Error al obtener información de feeds: {e}", 'ERROR')
+                import traceback
+                escribir_log(f"Traceback: {traceback.format_exc()}", 'DEBUG')
+                return {'status': 'error', 'message': f'Error al obtener información de feeds: {str(e)}', 'details': {}}
+                
+    except Exception as e:
+        escribir_log(f"Error al verificar feeds: {e}", 'ERROR')
+        return {'status': 'error', 'message': f'Error de conexión al verificar feeds: {str(e)}', 'details': {}}
+
 def formatear_mensaje_alerta_completo(resultados, config, timestamp):
     """Formatea un mensaje completo con todas las alertas agrupadas"""
     pais = config.get('pais', 'N/A')
@@ -482,7 +658,8 @@ def formatear_mensaje_alerta_completo(resultados, config, timestamp):
         'docker': '🔧',
         'gvmd': '🛡️',
         'gsad': '🌐',
-        'gvm_connection': '🔌'
+        'gvm_connection': '🔌',
+        'feeds': '📦'
     }
     
     # Nombres descriptivos
@@ -491,7 +668,8 @@ def formatear_mensaje_alerta_completo(resultados, config, timestamp):
         'docker': 'Docker Daemon',
         'gvmd': 'GVM (Puerto 9390)',
         'gsad': 'GSAD Web UI (Puerto 9392)',
-        'gvm_connection': 'Conexión GVM TLS'
+        'gvm_connection': 'Conexión GVM TLS',
+        'feeds': 'Feeds de Vulnerabilidades'
     }
     
     # Mensajes de estado
@@ -539,6 +717,33 @@ def formatear_mensaje_alerta_completo(resultados, config, timestamp):
             mensaje += f"{ok_item}\n"
         mensaje += "\n"
     
+    # Añadir información detallada de feeds desactualizados si existe
+    if 'feeds_details' in resultados and resultados.get('feeds_details'):
+        feeds_details = resultados['feeds_details']
+        feeds_stale = feeds_details.get('feeds_stale', [])
+        
+        if feeds_stale:
+            mensaje += "\n" + "="*40 + "\n"
+            mensaje += "<b>📦 FEEDS DESACTUALIZADOS:</b>\n\n"
+            for feed in feeds_stale:
+                mensaje += f"• <b>{feed['nombre']}:</b> {feed['dias']} días sin actualizar\n"
+                mensaje += f"  Última actualización: {feed['fecha']}\n\n"
+            
+            # Mostrar también el estado de todos los feeds
+            all_feeds = feeds_details.get('all_feeds', {})
+            if all_feeds:
+                mensaje += "<b>Estado de todos los feeds:</b>\n"
+                for feed_name, feed_info in all_feeds.items():
+                    if feed_info.get('dias') is not None:
+                        estado_emoji = "✅" if feed_info.get('actualizado', False) else "⚠️"
+                        mensaje += f"{estado_emoji} <b>{feed_name}:</b> {feed_info.get('dias', 'N/A')} días"
+                        if feed_info.get('fecha') and feed_info.get('fecha') != 'No disponible':
+                            mensaje += f" (Última: {feed_info['fecha']})"
+                        mensaje += "\n"
+                    else:
+                        mensaje += f"❓ <b>{feed_name}:</b> {feed_info.get('fecha', 'Desconocido')}\n"
+                mensaje += "\n"
+    
     # Añadir acciones recomendadas si hay problemas
     if alertas:
         mensaje += "\n" + "="*40 + "\n"
@@ -549,7 +754,8 @@ def formatear_mensaje_alerta_completo(resultados, config, timestamp):
             'docker': "🔧 Docker: Verificar con 'systemctl status docker' y 'systemctl start docker'",
             'gvmd': "🛡️ GVM: Verificar logs con 'docker logs openvas'",
             'gsad': "🌐 GSAD: Verificar que el puerto 9392 esté accesible",
-            'gvm_connection': "🔌 Conexión: Verificar credenciales y que GVM esté funcionando"
+            'gvm_connection': "🔌 Conexión: Verificar credenciales y que GVM esté funcionando",
+            'feeds': "📦 Feeds: Ejecutar '/opt/gvm/Cron/actualiza_gvm.sh' o 'greenbone-feed-sync'"
         }
         
         for check_name, status in checks.items():
@@ -602,6 +808,24 @@ def ejecutar_verificaciones(config):
     if gvm_conn['status'] != 'ok':
         resultados['status'] = 'error' if gvm_conn['status'] == 'error' else resultados['status']
     
+    # Verificar feeds (solo si GVM está conectado)
+    if gvm_conn['status'] == 'ok':
+        monitoring_config = config.get('monitoring', {})
+        feed_stale_days = monitoring_config.get('feed_stale_days', 30)
+        feeds = verificar_feeds(config, feed_stale_days)
+        resultados['checks']['feeds'] = feeds['status']
+        resultados['feeds_details'] = feeds.get('details', {})
+        escribir_log(f"Feeds: {feeds['message']}")
+        if feeds['status'] == 'warning':
+            resultados['status'] = 'warning' if resultados['status'] == 'ok' else resultados['status']
+        elif feeds['status'] == 'error':
+            resultados['status'] = 'error' if resultados['status'] == 'ok' else resultados['status']
+    else:
+        # Si GVM no está conectado, no podemos verificar feeds
+        resultados['checks']['feeds'] = 'error'
+        resultados['feeds_details'] = {}
+        escribir_log("Feeds: No se puede verificar (GVM no conectado)")
+    
     return resultados
 
 def enviar_alertas(resultados, config):
@@ -644,6 +868,11 @@ def enviar_alertas(resultados, config):
     # Verificar GVM
     if monitoring_config.get('alert_on_gvm_down', True):
         if checks.get('gvmd') != 'ok' or checks.get('gvm_connection') != 'ok':
+            tiene_problemas = True
+    
+    # Verificar feeds
+    if monitoring_config.get('alert_on_feeds_stale', True):
+        if checks.get('feeds') == 'warning' or checks.get('feeds') == 'error':
             tiene_problemas = True
     
     # Enviar mensaje completo solo si hay problemas o si se quiere reportar estado OK
