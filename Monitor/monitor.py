@@ -513,24 +513,10 @@ def verificar_feeds(config, feed_stale_days=30):
                 timeout=10
             )
         
-        # Si feed_sync no existe, intentar otras tablas
+        # Si feed_sync no existe, usar método alternativo directamente
         if result.returncode != 0:
-            escribir_log(f"Tabla feed_sync no encontrada, intentando alternativas...", 'INFO')
-            
-            # Intentar listar tablas primero para ver qué existe
-            list_tables_query = """SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename LIKE '%feed%' OR tablename LIKE '%info%' OR tablename LIKE '%sync%';"""
-            
-            list_cmd = f"""psql -h 127.0.0.1 -U postgres -d gvmd -t -A -c "{list_tables_query}" """
-            list_result = subprocess.run(list_cmd, shell=True, capture_output=True, text=True, env=env, timeout=10)
-            
-            if list_result.returncode != 0:
-                list_cmd = f"""docker exec {CONTAINER_NAME} sudo -u postgres psql -U postgres -d gvmd -t -A -c "{list_tables_query}" """
-                list_result = subprocess.run(list_cmd, shell=True, capture_output=True, text=True, timeout=10)
-            
-            # Si no encontramos tablas de feeds, usar método alternativo: verificar directorios
-            if list_result.returncode != 0 or not list_result.stdout.strip():
-                escribir_log("No se encontraron tablas de feeds en PostgreSQL, usando verificación de directorios", 'INFO')
-                return verificar_feeds_directorios(config, feed_stale_days)
+            escribir_log(f"Tabla feed_sync no encontrada, usando verificación de directorios", 'INFO')
+            return verificar_feeds_directorios(config, feed_stale_days)
         
         # Parsear resultados de la consulta feed_sync
         # Formato esperado: feed_type|last_update
