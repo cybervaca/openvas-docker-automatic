@@ -479,13 +479,9 @@ def obtener_fecha_feed(feed_type):
             f"SELECT value FROM info WHERE name LIKE '%feed%{db_name}%' AND name LIKE '%version%' LIMIT 1;"
         ]
         
-        escribir_log(f"Feed {feed_type}: Intentando obtener fecha desde PostgreSQL (tabla info)...", 'INFO')
-        
         # Intentar múltiples métodos de conexión (como en el proyecto original)
         for query in queries:
             try:
-                escribir_log(f"Feed {feed_type}: Query: {query[:100]}...", 'DEBUG')
-                
                 # Método 1: Usar sudo -u postgres (como en el proyecto original)
                 result = subprocess.run(
                     ['sudo', '-u', 'postgres', 'psql', '-d', 'gvmd', '-t', '-A', '-c', query],
@@ -496,7 +492,6 @@ def obtener_fecha_feed(feed_type):
                 
                 # Método 2: Si falla, intentar conexión directa
                 if result.returncode != 0:
-                    escribir_log(f"Feed {feed_type}: Método sudo falló, intentando conexión directa...", 'DEBUG')
                     env = os.environ.copy()
                     env['PGPASSWORD'] = 'admin'
                     comando = f"""psql -h 127.0.0.1 -U postgres -d gvmd -t -A -c "{query}" """
@@ -511,7 +506,6 @@ def obtener_fecha_feed(feed_type):
                 
                 # Método 3: Si falla, intentar con docker exec
                 if result.returncode != 0:
-                    escribir_log(f"Feed {feed_type}: Conexión directa falló, intentando docker exec...", 'DEBUG')
                     comando = f"""docker exec {CONTAINER_NAME} sudo -u postgres psql -U postgres -d gvmd -t -A -c "{query}" """
                     result = subprocess.run(
                         comando,
@@ -523,10 +517,7 @@ def obtener_fecha_feed(feed_type):
                 
                 if result.returncode == 0:
                     value = result.stdout.strip()
-                    escribir_log(f"Feed {feed_type}: Respuesta BD: '{value}'", 'DEBUG')
-                    
                     if value and value != '' and value != '0':
-                        escribir_log(f"Feed {feed_type}: Valor encontrado en BD: {value}", 'INFO')
                         # Los valores de versión suelen tener formato de timestamp
                         # Ejemplo: 20240126T0719 (YYYYMMDDTHHMM)
                         try:
@@ -535,25 +526,17 @@ def obtener_fecha_feed(feed_type):
                                 fecha_str = value.split('T')[0]
                                 if len(fecha_str) == 8:  # Asegurar formato correcto
                                     fecha = datetime.datetime.strptime(fecha_str, '%Y%m%d')
-                                    escribir_log(f"Feed {feed_type}: Fecha parseada desde BD: {fecha.strftime('%Y-%m-%d')}", 'INFO')
+                                    escribir_log(f"Feed {feed_type}: Fecha desde BD: {fecha.strftime('%Y-%m-%d')}", 'INFO')
                                     return fecha
-                        except ValueError as e:
-                            escribir_log(f"Feed {feed_type}: Error al parsear fecha '{value}': {e}", 'WARNING')
+                        except ValueError:
                             continue
-                    else:
-                        escribir_log(f"Feed {feed_type}: Query retornó valor vacío o '0'", 'DEBUG')
-                else:
-                    error_msg = result.stderr[:200] if result.stderr else result.stdout[:200] if result.stdout else 'Sin mensaje'
-                    escribir_log(f"Feed {feed_type}: Query falló: {error_msg}", 'DEBUG')
-            except Exception as e:
-                escribir_log(f"Feed {feed_type}: Excepción en query: {e}", 'DEBUG')
+            except Exception:
                 continue
-        
-        escribir_log(f"Feed {feed_type}: No se encontró versión en PostgreSQL, usando método de directorio", 'INFO')
     except Exception:
         pass
     
     # Método 2: Verificar archivos de feed directamente (fallback)
+    # Buscar archivos dentro del directorio y obtener la fecha más reciente (como proyecto original)
     feed_dirs = {
         'NVT': '/var/lib/openvas/plugins',
         'SCAP': '/var/lib/gvm/scap-data',
@@ -564,7 +547,58 @@ def obtener_fecha_feed(feed_type):
     feed_dir = feed_dirs.get(feed_type)
     if feed_dir:
         try:
-            # Obtener fecha de modificación del directorio usando docker exec
+            # Patrones de archivos específicos por tipo de feed
+            file_patterns = {
+                'NVT': ['*.nasl'],
+                'SCAP': ['*.xml', '*.gz'],
+                'CERT': ['*.xml', '*.gz'],
+                'GVMD_DATA': ['*.xml', '*.gz']
+            }
+            
+            patterns = file_patterns.get(feed_type, ['*'])
+            max_mtime = 0
+            archivos_encontrados = 0
+            
+            # Buscar archivos con los patrones específicos usando docker exec
+            for pattern in patterns:
+                # Usar find dentro del contenedor para buscar archivos
+                find_cmd = ['docker', 'exec', CONTAINER_NAME, 'find', feed_dir, '-type', 'f', '-name', pattern]
+                result = subprocess.run(
+                    find_cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=30
+                )
+                
+                if result.returncode == 0:
+                    files = result.stdout.strip().split('\n')
+                    for file_path in files[:200]:  # Limitar a primeros 200 archivos
+                        if not file_path:
+                            continue
+                        try:
+                            # Obtener timestamp de modificación del archivo
+                            stat_cmd = ['docker', 'exec', CONTAINER_NAME, 'stat', '-c', '%Y', file_path]
+                            stat_result = subprocess.run(
+                                stat_cmd,
+                                capture_output=True,
+                                text=True,
+                                timeout=5
+                            )
+                            if stat_result.returncode == 0:
+                                file_mtime = int(stat_result.stdout.strip())
+                                if file_mtime > max_mtime:
+                                    max_mtime = file_mtime
+                                archivos_encontrados += 1
+                        except (ValueError, subprocess.TimeoutExpired):
+                            continue
+            
+            # Si encontramos archivos, usar la fecha más reciente
+            if max_mtime > 0:
+                fecha = datetime.datetime.fromtimestamp(max_mtime)
+                escribir_log(f"Feed {feed_type}: Fecha desde directorio: {fecha.strftime('%Y-%m-%d %H:%M:%S')} ({archivos_encontrados} archivos)", 'INFO')
+                return fecha
+            
+            # Si no encontramos archivos con patrones, usar fecha del directorio como último recurso
             result = subprocess.run(
                 ['docker', 'exec', CONTAINER_NAME, 'stat', '-c', '%Y', feed_dir],
                 capture_output=True,
@@ -576,12 +610,12 @@ def obtener_fecha_feed(feed_type):
                 try:
                     timestamp = int(result.stdout.strip())
                     fecha = datetime.datetime.fromtimestamp(timestamp)
-                    escribir_log(f"Feed {feed_type}: Fecha desde directorio: {fecha.strftime('%Y-%m-%d %H:%M:%S')}", 'INFO')
+                    escribir_log(f"Feed {feed_type}: Fecha desde directorio (sin archivos): {fecha.strftime('%Y-%m-%d %H:%M:%S')}", 'INFO')
                     return fecha
-                except ValueError as e:
-                    escribir_log(f"Feed {feed_type}: Error al convertir timestamp: {e}", 'WARNING')
+                except ValueError:
                     pass
-        except Exception:
+        except Exception as e:
+            escribir_log(f"Feed {feed_type}: Error al verificar directorio: {e}", 'DEBUG')
             pass
     
     return None
