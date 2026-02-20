@@ -478,65 +478,95 @@ def verificar_feeds(config, feed_stale_days=30):
             escribir_log(f"Error al verificar contenedor: {e}", 'ERROR')
             return {'status': 'error', 'message': f'Error al verificar contenedor: {str(e)}', 'details': {}}
         
-        # Rutas de archivos de feeds dentro del contenedor Docker
-        # Estos archivos se actualizan cuando se sincronizan los feeds
-        feed_paths = {
-            'NVT': '/var/lib/openvas/plugins/feed-update.lock',
-            'SCAP': '/var/lib/gvm/scap-data/feed-update.lock',
-            'CERT': '/var/lib/gvm/cert-data/feed-update.lock',
-            'GVMD_DATA': '/var/lib/gvm/data-objects/feed-update.lock'
+        # Rutas de directorios de feeds dentro del contenedor Docker
+        # Verificamos la fecha de modificación del directorio o archivos dentro
+        feed_dirs = {
+            'NVT': '/var/lib/openvas/plugins',
+            'SCAP': '/var/lib/gvm/scap-data',
+            'CERT': '/var/lib/gvm/cert-data',
+            'GVMD_DATA': '/var/lib/gvm/data-objects'
+        }
+        
+        # Archivos alternativos que pueden indicar última actualización
+        feed_alt_files = {
+            'NVT': ['/var/lib/openvas/plugins/feed-update.lock', '/var/lib/openvas/plugins/.timestamp'],
+            'SCAP': ['/var/lib/gvm/scap-data/feed-update.lock', '/var/lib/gvm/scap-data/.timestamp'],
+            'CERT': ['/var/lib/gvm/cert-data/feed-update.lock', '/var/lib/gvm/cert-data/.timestamp'],
+            'GVMD_DATA': ['/var/lib/gvm/data-objects/feed-update.lock', '/var/lib/gvm/data-objects/.timestamp']
         }
         
         # Verificar cada feed usando docker exec
-        for feed_name, lock_path in feed_paths.items():
-            try:
-                # Ejecutar comando dentro del contenedor para obtener fecha del archivo
-                # Usamos 'stat' para obtener el timestamp de modificación
-                result = subprocess.run(
-                    ['docker', 'exec', CONTAINER_NAME, 'stat', '-c', '%Y', lock_path],
-                    capture_output=True,
-                    text=True,
-                    timeout=10
-                )
+        for feed_name, feed_dir in feed_dirs.items():
+            fecha_actualizacion = None
+            archivo_usado = None
+            
+            # Intentar primero con archivos alternativos
+            for alt_file in feed_alt_files.get(feed_name, []):
+                try:
+                    result = subprocess.run(
+                        ['docker', 'exec', CONTAINER_NAME, 'stat', '-c', '%Y', alt_file],
+                        capture_output=True,
+                        text=True,
+                        timeout=10
+                    )
+                    
+                    if result.returncode == 0 and result.stdout.strip():
+                        try:
+                            timestamp = int(result.stdout.strip())
+                            fecha_actualizacion = datetime.datetime.fromtimestamp(timestamp)
+                            archivo_usado = alt_file
+                            break
+                        except ValueError:
+                            continue
+                except:
+                    continue
+            
+            # Si no encontramos archivo específico, usar fecha de modificación del directorio
+            if fecha_actualizacion is None:
+                try:
+                    result = subprocess.run(
+                        ['docker', 'exec', CONTAINER_NAME, 'stat', '-c', '%Y', feed_dir],
+                        capture_output=True,
+                        text=True,
+                        timeout=10
+                    )
+                    
+                    if result.returncode == 0 and result.stdout.strip():
+                        try:
+                            timestamp = int(result.stdout.strip())
+                            fecha_actualizacion = datetime.datetime.fromtimestamp(timestamp)
+                            archivo_usado = f"directorio {feed_dir}"
+                        except ValueError:
+                            pass
+                except:
+                    pass
+            
+            # Si encontramos fecha, calcular días
+            if fecha_actualizacion:
+                dias_desde_actualizacion = (fecha_actual - fecha_actualizacion).days
                 
-                if result.returncode == 0 and result.stdout.strip():
-                    # Obtener timestamp Unix
-                    try:
-                        timestamp = int(result.stdout.strip())
-                        fecha_actualizacion = datetime.datetime.fromtimestamp(timestamp)
-                        
-                        # Calcular días desde última actualización
-                        dias_desde_actualizacion = (fecha_actual - fecha_actualizacion).days
-                        
-                        feeds_info[feed_name] = {
-                            'fecha': fecha_actualizacion.strftime('%Y-%m-%d %H:%M:%S'),
-                            'dias': dias_desde_actualizacion,
-                            'actualizado': dias_desde_actualizacion < feed_stale_days
-                        }
-                        
-                        if dias_desde_actualizacion >= feed_stale_days:
-                            feeds_stale.append({
-                                'nombre': feed_name,
-                                'dias': dias_desde_actualizacion,
-                                'fecha': fecha_actualizacion.strftime('%Y-%m-%d %H:%M:%S')
-                            })
-                    except ValueError:
-                        # Error al convertir timestamp
-                        feeds_info[feed_name] = {
-                            'fecha': 'Error al parsear fecha',
-                            'dias': None,
-                            'actualizado': None
-                        }
-                        escribir_log(f"Feed {feed_name}: Error al parsear timestamp", 'WARNING')
-                else:
-                    # Archivo no encontrado o error
-                    error_msg = result.stderr.strip() if result.stderr else 'Archivo no encontrado'
-                    feeds_info[feed_name] = {
-                        'fecha': 'No disponible',
-                        'dias': None,
-                        'actualizado': None
-                    }
-                    escribir_log(f"Feed {feed_name}: {error_msg}", 'WARNING')
+                feeds_info[feed_name] = {
+                    'fecha': fecha_actualizacion.strftime('%Y-%m-%d %H:%M:%S'),
+                    'dias': dias_desde_actualizacion,
+                    'actualizado': dias_desde_actualizacion < feed_stale_days,
+                    'fuente': archivo_usado
+                }
+                
+                if dias_desde_actualizacion >= feed_stale_days:
+                    feeds_stale.append({
+                        'nombre': feed_name,
+                        'dias': dias_desde_actualizacion,
+                        'fecha': fecha_actualizacion.strftime('%Y-%m-%d %H:%M:%S')
+                    })
+            else:
+                # No se pudo obtener fecha
+                feeds_info[feed_name] = {
+                    'fecha': 'No disponible',
+                    'dias': None,
+                    'actualizado': None,
+                    'fuente': 'No encontrado'
+                }
+                escribir_log(f"Feed {feed_name}: No se pudo obtener fecha de actualización", 'WARNING')
                     
             except subprocess.TimeoutExpired:
                 feeds_info[feed_name] = {
