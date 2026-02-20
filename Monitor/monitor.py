@@ -571,7 +571,7 @@ def verificar_feeds(config, feed_stale_days=30):
                     'fecha': fecha_actualizacion.strftime('%Y-%m-%d %H:%M:%S'),
                     'dias': dias_desde_actualizacion,
                     'actualizado': dias_desde_actualizacion < feed_stale_days,
-                    'fuente': 'PostgreSQL'
+                    'fuente': 'PostgreSQL (tabla info)'
                 }
                 
                 if dias_desde_actualizacion >= feed_stale_days:
@@ -581,14 +581,14 @@ def verificar_feeds(config, feed_stale_days=30):
                         'fecha': fecha_actualizacion.strftime('%Y-%m-%d %H:%M:%S')
                     })
             else:
-                # No se pudo obtener fecha desde la base de datos
+                # No se pudo obtener fecha
                 feeds_info[feed_name] = {
-                    'fecha': 'No disponible en BD',
+                    'fecha': 'No disponible',
                     'dias': None,
                     'actualizado': None,
-                    'fuente': 'PostgreSQL'
+                    'fuente': 'No encontrado'
                 }
-                escribir_log(f"Feed {feed_name}: No se encontró información de fecha en la base de datos", 'WARNING')
+                escribir_log(f"Feed {feed_name}: No se pudo obtener fecha de actualización", 'WARNING')
         
         # Determinar estado general
         if feeds_stale:
