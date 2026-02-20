@@ -447,10 +447,120 @@ def verificar_gvm_connection(config):
     except Exception as e:
         return {'status': 'error', 'message': f'Error de conexión GVM: {str(e)}'}
 
+def obtener_fecha_feed(feed_type):
+    """
+    Obtiene la fecha de última actualización de un feed.
+    Basado en el método del proyecto original maintenance.py.
+    Intenta múltiples métodos: base de datos (tabla info), archivos de feed.
+    
+    Args:
+        feed_type: Tipo de feed (NVT, SCAP, CERT, GVMD_DATA)
+    
+    Returns:
+        datetime.datetime o None: Fecha de última actualización del feed, o None si no se puede obtener
+    """
+    # Método 1: Consultar base de datos PostgreSQL para obtener versión del feed (más confiable)
+    # La tabla info contiene versiones de feeds con formato: YYYYMMDDTHHMM (ej: 20240126T0719)
+    try:
+        feed_db_names = {
+            'NVT': 'nvt',
+            'SCAP': 'scap',
+            'CERT': 'cert',
+            'GVMD_DATA': 'gvmd_data'
+        }
+        
+        db_name = feed_db_names.get(feed_type, feed_type.lower())
+        
+        # Consultar tabla info para obtener versión del feed
+        # Las versiones suelen tener formato: YYYYMMDDTHHMM (ej: 20240126T0719)
+        queries = [
+            f"SELECT value FROM info WHERE name = '{db_name}_version' OR name = '{db_name}_feed_version';",
+            f"SELECT value FROM info WHERE name LIKE '%{db_name}%version%' ORDER BY name LIMIT 1;",
+            f"SELECT value FROM info WHERE name LIKE '%feed%{db_name}%' AND name LIKE '%version%' LIMIT 1;"
+        ]
+        
+        env = os.environ.copy()
+        env['PGPASSWORD'] = 'admin'  # Contraseña por defecto del contenedor OpenVAS
+        
+        for query in queries:
+            try:
+                # Intentar conexión directa primero
+                comando = f"""psql -h 127.0.0.1 -U postgres -d gvmd -t -A -c "{query}" """
+                result = subprocess.run(
+                    comando,
+                    shell=True,
+                    capture_output=True,
+                    text=True,
+                    env=env,
+                    timeout=10
+                )
+                
+                # Si falla, intentar con docker exec
+                if result.returncode != 0:
+                    comando = f"""docker exec {CONTAINER_NAME} sudo -u postgres psql -U postgres -d gvmd -t -A -c "{query}" """
+                    result = subprocess.run(
+                        comando,
+                        shell=True,
+                        capture_output=True,
+                        text=True,
+                        timeout=10
+                    )
+                
+                if result.returncode == 0:
+                    value = result.stdout.strip()
+                    if value and value != '' and value != '0':
+                        # Los valores de versión suelen tener formato de timestamp
+                        # Ejemplo: 20240126T0719 (YYYYMMDDTHHMM)
+                        try:
+                            if 'T' in value and len(value) >= 8:
+                                # Formato: YYYYMMDDTHHMM
+                                fecha_str = value.split('T')[0]
+                                if len(fecha_str) == 8:  # Asegurar formato correcto
+                                    fecha = datetime.datetime.strptime(fecha_str, '%Y%m%d')
+                                    return fecha
+                        except ValueError:
+                            continue
+            except Exception:
+                continue
+    except Exception:
+        pass
+    
+    # Método 2: Verificar archivos de feed directamente (fallback)
+    feed_dirs = {
+        'NVT': '/var/lib/openvas/plugins',
+        'SCAP': '/var/lib/gvm/scap-data',
+        'CERT': '/var/lib/gvm/cert-data',
+        'GVMD_DATA': '/var/lib/gvm/data-objects'
+    }
+    
+    feed_dir = feed_dirs.get(feed_type)
+    if feed_dir:
+        try:
+            # Obtener fecha de modificación del directorio usando docker exec
+            result = subprocess.run(
+                ['docker', 'exec', CONTAINER_NAME, 'stat', '-c', '%Y', feed_dir],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            
+            if result.returncode == 0 and result.stdout.strip():
+                try:
+                    timestamp = int(result.stdout.strip())
+                    fecha = datetime.datetime.fromtimestamp(timestamp)
+                    return fecha
+                except ValueError:
+                    pass
+        except Exception:
+            pass
+    
+    return None
+
+
 def verificar_feeds(config, feed_stale_days=30):
     """
     Verifica la fecha de última actualización de los feeds de OpenVAS.
-    Consulta la base de datos PostgreSQL de GVM para obtener información de feeds.
+    Usa el método del proyecto original: consulta tabla info en PostgreSQL.
     
     Args:
         config: Configuración del sistema
@@ -464,86 +574,6 @@ def verificar_feeds(config, feed_stale_days=30):
         feeds_info = {}
         feeds_stale = []
         
-        # En GVM, la información de feeds puede estar en diferentes tablas
-        # Intentamos primero listar las tablas disponibles para encontrar la correcta
-        # Las tablas comunes son: info, feed_info, feed_sync, o puede estar en metadatos
-        
-        # Primero intentamos consultar la tabla feed_sync que suele contener información de sincronización
-        sql_query = """
-        SELECT feed_type, last_update 
-        FROM feed_sync 
-        WHERE feed_type IN ('NVT', 'SCAP', 'CERT', 'GVMD_DATA')
-        ORDER BY feed_type;
-        """
-        
-        # Si feed_sync no existe, intentamos otras tablas comunes
-        tablas_alternativas = [
-            "SELECT type, name, value FROM info WHERE type IN ('NVT', 'SCAP', 'CERT', 'GVMD_DATA')",
-            "SELECT feed_type, timestamp FROM feed_info WHERE feed_type IN ('NVT', 'SCAP', 'CERT', 'GVMD_DATA')",
-            "SELECT name, value FROM settings WHERE name LIKE '%feed%' OR name LIKE '%sync%'"
-        ]
-        
-        # Intentar conexión directa a PostgreSQL (puerto 5432 expuesto)
-        env = os.environ.copy()
-        env['PGPASSWORD'] = 'admin'  # Contraseña por defecto del contenedor OpenVAS
-        
-        result = None
-        feed_data = {}
-        
-        # Intentar primero con feed_sync
-        comando_directo = f"""psql -h 127.0.0.1 -U postgres -d gvmd -t -A -F'|' -c "{sql_query}" """
-        
-        result = subprocess.run(
-            comando_directo,
-            shell=True,
-            capture_output=True,
-            text=True,
-            env=env,
-            timeout=10
-        )
-        
-        # Si falla conexión directa, intentar con docker exec
-        if result.returncode != 0:
-            comando_docker = f"""docker exec {CONTAINER_NAME} sudo -u postgres psql -U postgres -d gvmd -t -A -F'|' -c "{sql_query}" """
-            result = subprocess.run(
-                comando_docker,
-                shell=True,
-                capture_output=True,
-                text=True,
-                timeout=10
-            )
-        
-        # Si feed_sync no existe, usar método alternativo directamente
-        if result.returncode != 0:
-            escribir_log(f"Tabla feed_sync no encontrada, usando verificación de directorios", 'INFO')
-            return verificar_feeds_directorios(config, feed_stale_days)
-        
-        # Parsear resultados de la consulta feed_sync
-        # Formato esperado: feed_type|last_update
-        if result.returncode == 0 and result.stdout.strip():
-            for line in result.stdout.strip().split('\n'):
-                if not line or '|' not in line:
-                    continue
-                parts = line.split('|', 1)
-                if len(parts) >= 2:
-                    feed_type = parts[0].strip()
-                    last_update_str = parts[1].strip()
-                    
-                    try:
-                        # Intentar parsear la fecha
-                        if 'T' in last_update_str:
-                            fecha_actualizacion = datetime.datetime.fromisoformat(last_update_str.replace('Z', '+00:00'))
-                        elif last_update_str.isdigit():
-                            fecha_actualizacion = datetime.datetime.fromtimestamp(int(last_update_str))
-                        else:
-                            fecha_actualizacion = datetime.datetime.strptime(last_update_str, '%Y-%m-%d %H:%M:%S')
-                        
-                        if feed_type not in feed_data:
-                            feed_data[feed_type] = {}
-                        feed_data[feed_type]['last_update'] = fecha_actualizacion
-                    except:
-                        pass
-        
         # Mapeo de tipos de feeds
         feed_types = {
             'NVT': 'NVT',
@@ -552,12 +582,9 @@ def verificar_feeds(config, feed_stale_days=30):
             'GVMD_DATA': 'GVMD_DATA'
         }
         
-        # Buscar información de última actualización para cada feed
+        # Obtener fecha de cada feed usando el método del proyecto original
         for feed_name, feed_type in feed_types.items():
-            fecha_actualizacion = None
-            
-            if feed_type in feed_data and 'last_update' in feed_data[feed_type]:
-                fecha_actualizacion = feed_data[feed_type]['last_update']
+            fecha_actualizacion = obtener_fecha_feed(feed_type)
             
             # Calcular días desde última actualización
             if fecha_actualizacion:
