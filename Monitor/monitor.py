@@ -509,6 +509,7 @@ def obtener_fecha_feed(feed_type):
                 if result.returncode == 0:
                     value = result.stdout.strip()
                     if value and value != '' and value != '0':
+                        escribir_log(f"Feed {feed_type}: Valor encontrado en BD: {value}", 'INFO')
                         # Los valores de versión suelen tener formato de timestamp
                         # Ejemplo: 20240126T0719 (YYYYMMDDTHHMM)
                         try:
@@ -517,8 +518,10 @@ def obtener_fecha_feed(feed_type):
                                 fecha_str = value.split('T')[0]
                                 if len(fecha_str) == 8:  # Asegurar formato correcto
                                     fecha = datetime.datetime.strptime(fecha_str, '%Y%m%d')
+                                    escribir_log(f"Feed {feed_type}: Fecha parseada: {fecha.strftime('%Y-%m-%d')}", 'INFO')
                                     return fecha
-                        except ValueError:
+                        except ValueError as e:
+                            escribir_log(f"Feed {feed_type}: Error al parsear fecha '{value}': {e}", 'WARNING')
                             continue
             except Exception:
                 continue
@@ -548,8 +551,10 @@ def obtener_fecha_feed(feed_type):
                 try:
                     timestamp = int(result.stdout.strip())
                     fecha = datetime.datetime.fromtimestamp(timestamp)
+                    escribir_log(f"Feed {feed_type}: Fecha desde directorio: {fecha.strftime('%Y-%m-%d %H:%M:%S')}", 'INFO')
                     return fecha
-                except ValueError:
+                except ValueError as e:
+                    escribir_log(f"Feed {feed_type}: Error al convertir timestamp: {e}", 'WARNING')
                     pass
         except Exception:
             pass
@@ -584,15 +589,19 @@ def verificar_feeds(config, feed_stale_days=30):
         
         # Obtener fecha de cada feed usando el método del proyecto original
         for feed_name, feed_type in feed_types.items():
+            escribir_log(f"Verificando feed {feed_name}...", 'INFO')
             fecha_actualizacion = obtener_fecha_feed(feed_type)
             
             # Calcular días desde última actualización
             if fecha_actualizacion:
+                escribir_log(f"Feed {feed_name}: Fecha obtenida: {fecha_actualizacion.strftime('%Y-%m-%d %H:%M:%S')}", 'INFO')
                 # Normalizar timezone si es necesario
                 if fecha_actualizacion.tzinfo is not None:
                     fecha_actualizacion = fecha_actualizacion.replace(tzinfo=None)
                 
                 dias_desde_actualizacion = (fecha_actual - fecha_actualizacion).days
+                
+                escribir_log(f"Feed {feed_name}: {dias_desde_actualizacion} días desde última actualización (máximo: {feed_stale_days} días)", 'INFO')
                 
                 feeds_info[feed_name] = {
                     'fecha': fecha_actualizacion.strftime('%Y-%m-%d %H:%M:%S'),
@@ -602,6 +611,7 @@ def verificar_feeds(config, feed_stale_days=30):
                 }
                 
                 if dias_desde_actualizacion >= feed_stale_days:
+                    escribir_log(f"Feed {feed_name}: ⚠ DESACTUALIZADO ({dias_desde_actualizacion} días > {feed_stale_days} días)", 'WARNING')
                     feeds_stale.append({
                         'nombre': feed_name,
                         'dias': dias_desde_actualizacion,
