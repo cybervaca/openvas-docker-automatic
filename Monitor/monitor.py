@@ -450,7 +450,7 @@ def verificar_gvm_connection(config):
 def verificar_feeds(config, feed_stale_days=30):
     """
     Verifica la fecha de última actualización de los feeds de OpenVAS.
-    Usa el comando get_info de GMP para obtener información de feeds.
+    Verifica directamente los archivos de feeds en el contenedor Docker.
     
     Args:
         config: Configuración del sistema
@@ -460,168 +460,139 @@ def verificar_feeds(config, feed_stale_days=30):
         dict: {'status': 'ok'|'warning'|'error', 'message': str, 'details': dict}
     """
     try:
-        username = config.get('user', 'admin')
-        password = config.get('password', '')
+        fecha_actual = datetime.datetime.now()
+        feeds_info = {}
+        feeds_stale = []
         
-        if not password:
-            return {'status': 'warning', 'message': 'Password no configurado', 'details': {}}
+        # Verificar que el contenedor existe y está corriendo
+        try:
+            result = subprocess.run(
+                ['docker', 'ps', '--filter', f'name={CONTAINER_NAME}', '--format', '{{.Names}}'],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            if CONTAINER_NAME not in result.stdout:
+                return {'status': 'error', 'message': 'Contenedor Docker no está corriendo', 'details': {}}
+        except Exception as e:
+            escribir_log(f"Error al verificar contenedor: {e}", 'ERROR')
+            return {'status': 'error', 'message': f'Error al verificar contenedor: {str(e)}', 'details': {}}
         
-        connection = TLSConnection(hostname="127.0.0.1", port=GVM_PORT)
+        # Rutas de archivos de feeds dentro del contenedor Docker
+        # Estos archivos se actualizan cuando se sincronizan los feeds
+        feed_paths = {
+            'NVT': '/var/lib/openvas/plugins/feed-update.lock',
+            'SCAP': '/var/lib/gvm/scap-data/feed-update.lock',
+            'CERT': '/var/lib/gvm/cert-data/feed-update.lock',
+            'GVMD_DATA': '/var/lib/gvm/data-objects/feed-update.lock'
+        }
         
-        with Gmp(connection=connection) as gmp:
-            gmp.authenticate(username, password)
-            
-            # Obtener información de feeds usando get_info
+        # Verificar cada feed usando docker exec
+        for feed_name, lock_path in feed_paths.items():
             try:
-                response = gmp.get_info()
-                root = ET.fromstring(response)
+                # Ejecutar comando dentro del contenedor para obtener fecha del archivo
+                # Usamos 'stat' para obtener el timestamp de modificación
+                result = subprocess.run(
+                    ['docker', 'exec', CONTAINER_NAME, 'stat', '-c', '%Y', lock_path],
+                    capture_output=True,
+                    text=True,
+                    timeout=10
+                )
                 
-                # Verificar status de la respuesta
-                status = root.get("status")
-                if status != "200":
-                    return {'status': 'error', 'message': f'Error al obtener información de feeds (status: {status})', 'details': {}}
-                
-                # Buscar información de feeds en la respuesta
-                feeds_info = {}
-                feeds_stale = []
-                
-                # Buscar todos los elementos info que contengan información de feeds
-                info_elements = root.findall('.//info')
-                
-                # Tipos de feeds a verificar con sus posibles nombres
-                feed_types = {
-                    'NVT': ['NVT', 'NVTs', 'nvt'],
-                    'SCAP': ['SCAP', 'scap'],
-                    'CERT': ['CERT', 'cert'],
-                    'GVMD_DATA': ['GVMD_DATA', 'GVMD', 'gvmd_data', 'gvmd']
-                }
-                
-                fecha_actual = datetime.datetime.now()
-                
-                # Intentar obtener información de cada tipo de feed
-                for feed_name, posibles_nombres in feed_types.items():
-                    feed_encontrado = False
-                    
-                    # Buscar en los elementos info
-                    for info_elem in info_elements:
-                        # Buscar por tipo o nombre
-                        tipo = info_elem.get('type', '').upper()
-                        name_elem = info_elem.find('name')
-                        name_text = (name_elem.text.upper() if name_elem is not None and name_elem.text else '')
+                if result.returncode == 0 and result.stdout.strip():
+                    # Obtener timestamp Unix
+                    try:
+                        timestamp = int(result.stdout.strip())
+                        fecha_actualizacion = datetime.datetime.fromtimestamp(timestamp)
                         
-                        # Verificar si este elemento corresponde al feed que buscamos
-                        if any(nombre in tipo or nombre in name_text for nombre in posibles_nombres):
-                            feed_encontrado = True
-                            
-                            # Buscar fecha de actualización en diferentes campos posibles
-                            fecha_actualizacion = None
-                            
-                            # Intentar diferentes campos de fecha
-                            for fecha_field in ['update', 'last_update', 'timestamp', 'modified', 'last_modified']:
-                                fecha_elem = info_elem.find(fecha_field)
-                                if fecha_elem is not None and fecha_elem.text:
-                                    fecha_str = fecha_elem.text.strip()
-                                    
-                                    # Intentar parsear la fecha en diferentes formatos
-                                    try:
-                                        # Formato ISO 8601: 2024-01-15T10:30:00Z o 2024-01-15T10:30:00+00:00
-                                        if 'T' in fecha_str:
-                                            fecha_str_clean = fecha_str.replace('Z', '+00:00')
-                                            fecha_actualizacion = datetime.datetime.fromisoformat(fecha_str_clean)
-                                        # Formato timestamp Unix
-                                        elif fecha_str.isdigit():
-                                            timestamp = int(fecha_str)
-                                            fecha_actualizacion = datetime.datetime.fromtimestamp(timestamp)
-                                        # Formato: YYYY-MM-DD HH:MM:SS
-                                        else:
-                                            fecha_actualizacion = datetime.datetime.strptime(fecha_str, '%Y-%m-%d %H:%M:%S')
-                                        
-                                        if fecha_actualizacion:
-                                            break
-                                    except:
-                                        continue
-                            
-                            if fecha_actualizacion:
-                                # Calcular días desde última actualización
-                                # Normalizar timezone si es necesario
-                                if fecha_actualizacion.tzinfo is not None:
-                                    fecha_actualizacion = fecha_actualizacion.replace(tzinfo=None)
-                                
-                                dias_desde_actualizacion = (fecha_actual - fecha_actualizacion).days
-                                
-                                feeds_info[feed_name] = {
-                                    'fecha': fecha_actualizacion.strftime('%Y-%m-%d %H:%M:%S'),
-                                    'dias': dias_desde_actualizacion,
-                                    'actualizado': dias_desde_actualizacion < feed_stale_days
-                                }
-                                
-                                if dias_desde_actualizacion >= feed_stale_days:
-                                    feeds_stale.append({
-                                        'nombre': feed_name,
-                                        'dias': dias_desde_actualizacion,
-                                        'fecha': fecha_actualizacion.strftime('%Y-%m-%d %H:%M:%S')
-                                    })
-                            else:
-                                # No se pudo obtener fecha
-                                feeds_info[feed_name] = {
-                                    'fecha': 'No disponible',
-                                    'dias': None,
-                                    'actualizado': None
-                                }
-                            break
-                    
-                    if not feed_encontrado:
-                        # Feed no encontrado en la respuesta
+                        # Calcular días desde última actualización
+                        dias_desde_actualizacion = (fecha_actual - fecha_actualizacion).days
+                        
                         feeds_info[feed_name] = {
-                            'fecha': 'No encontrado',
+                            'fecha': fecha_actualizacion.strftime('%Y-%m-%d %H:%M:%S'),
+                            'dias': dias_desde_actualizacion,
+                            'actualizado': dias_desde_actualizacion < feed_stale_days
+                        }
+                        
+                        if dias_desde_actualizacion >= feed_stale_days:
+                            feeds_stale.append({
+                                'nombre': feed_name,
+                                'dias': dias_desde_actualizacion,
+                                'fecha': fecha_actualizacion.strftime('%Y-%m-%d %H:%M:%S')
+                            })
+                    except ValueError:
+                        # Error al convertir timestamp
+                        feeds_info[feed_name] = {
+                            'fecha': 'Error al parsear fecha',
                             'dias': None,
                             'actualizado': None
                         }
-                
-                # Determinar estado general
-                if feeds_stale:
-                    mensaje = f"{len(feeds_stale)} feed(s) desactualizado(s) (>{feed_stale_days} días)"
-                    return {
-                        'status': 'warning',
-                        'message': mensaje,
-                        'details': {
-                            'feeds_stale': feeds_stale,
-                            'all_feeds': feeds_info,
-                            'stale_days': feed_stale_days
-                        }
-                    }
-                elif any(feed.get('actualizado') is None for feed in feeds_info.values()):
-                    # Algunos feeds no se pudieron verificar
-                    return {
-                        'status': 'warning',
-                        'message': 'No se pudo verificar todos los feeds',
-                        'details': {
-                            'feeds_stale': [],
-                            'all_feeds': feeds_info,
-                            'stale_days': feed_stale_days
-                        }
-                    }
+                        escribir_log(f"Feed {feed_name}: Error al parsear timestamp", 'WARNING')
                 else:
-                    # Todos los feeds están actualizados
-                    return {
-                        'status': 'ok',
-                        'message': f'Todos los feeds actualizados (<{feed_stale_days} días)',
-                        'details': {
-                            'feeds_stale': [],
-                            'all_feeds': feeds_info,
-                            'stale_days': feed_stale_days
-                        }
+                    # Archivo no encontrado o error
+                    error_msg = result.stderr.strip() if result.stderr else 'Archivo no encontrado'
+                    feeds_info[feed_name] = {
+                        'fecha': 'No disponible',
+                        'dias': None,
+                        'actualizado': None
                     }
+                    escribir_log(f"Feed {feed_name}: {error_msg}", 'WARNING')
                     
+            except subprocess.TimeoutExpired:
+                feeds_info[feed_name] = {
+                    'fecha': 'Timeout',
+                    'dias': None,
+                    'actualizado': None
+                }
+                escribir_log(f"Feed {feed_name}: Timeout al verificar", 'WARNING')
             except Exception as e:
-                escribir_log(f"Error al obtener información de feeds: {e}", 'ERROR')
-                import traceback
-                escribir_log(f"Traceback: {traceback.format_exc()}", 'DEBUG')
-                return {'status': 'error', 'message': f'Error al obtener información de feeds: {str(e)}', 'details': {}}
+                feeds_info[feed_name] = {
+                    'fecha': f'Error: {str(e)[:50]}',
+                    'dias': None,
+                    'actualizado': None
+                }
+                escribir_log(f"Feed {feed_name}: Error al verificar - {e}", 'WARNING')
+        
+        # Determinar estado general
+        if feeds_stale:
+            mensaje = f"{len(feeds_stale)} feed(s) desactualizado(s) (>{feed_stale_days} días)"
+            return {
+                'status': 'warning',
+                'message': mensaje,
+                'details': {
+                    'feeds_stale': feeds_stale,
+                    'all_feeds': feeds_info,
+                    'stale_days': feed_stale_days
+                }
+            }
+        elif any(feed.get('actualizado') is None for feed in feeds_info.values()):
+            # Algunos feeds no se pudieron verificar
+            return {
+                'status': 'warning',
+                'message': 'No se pudo verificar todos los feeds',
+                'details': {
+                    'feeds_stale': [],
+                    'all_feeds': feeds_info,
+                    'stale_days': feed_stale_days
+                }
+            }
+        else:
+            # Todos los feeds están actualizados
+            return {
+                'status': 'ok',
+                'message': f'Todos los feeds actualizados (<{feed_stale_days} días)',
+                'details': {
+                    'feeds_stale': [],
+                    'all_feeds': feeds_info,
+                    'stale_days': feed_stale_days
+                }
+            }
                 
     except Exception as e:
         escribir_log(f"Error al verificar feeds: {e}", 'ERROR')
-        return {'status': 'error', 'message': f'Error de conexión al verificar feeds: {str(e)}', 'details': {}}
+        import traceback
+        escribir_log(f"Traceback: {traceback.format_exc()}", 'DEBUG')
+        return {'status': 'error', 'message': f'Error al verificar feeds: {str(e)}', 'details': {}}
 
 def formatear_mensaje_alerta_completo(resultados, config, timestamp):
     """Formatea un mensaje completo con todas las alertas agrupadas"""
