@@ -464,27 +464,33 @@ def verificar_feeds(config, feed_stale_days=30):
         feeds_info = {}
         feeds_stale = []
         
-        # Mapeo de tipos de feeds a nombres en la base de datos
-        feed_types = {
-            'NVT': 'NVT',
-            'SCAP': 'SCAP',
-            'CERT': 'CERT',
-            'GVMD_DATA': 'GVMD_DATA'
-        }
+        # En GVM, la información de feeds puede estar en diferentes tablas
+        # Intentamos primero listar las tablas disponibles para encontrar la correcta
+        # Las tablas comunes son: info, feed_info, feed_sync, o puede estar en metadatos
         
-        # Consulta SQL para obtener información de feeds desde la tabla info
-        # La tabla info contiene información sobre feeds con campos como type, name, value
+        # Primero intentamos consultar la tabla feed_sync que suele contener información de sincronización
         sql_query = """
-        SELECT type, name, value 
-        FROM info 
-        WHERE type IN ('NVT', 'SCAP', 'CERT', 'GVMD_DATA')
-        ORDER BY type, name;
+        SELECT feed_type, last_update 
+        FROM feed_sync 
+        WHERE feed_type IN ('NVT', 'SCAP', 'CERT', 'GVMD_DATA')
+        ORDER BY feed_type;
         """
+        
+        # Si feed_sync no existe, intentamos otras tablas comunes
+        tablas_alternativas = [
+            "SELECT type, name, value FROM info WHERE type IN ('NVT', 'SCAP', 'CERT', 'GVMD_DATA')",
+            "SELECT feed_type, timestamp FROM feed_info WHERE feed_type IN ('NVT', 'SCAP', 'CERT', 'GVMD_DATA')",
+            "SELECT name, value FROM settings WHERE name LIKE '%feed%' OR name LIKE '%sync%'"
+        ]
         
         # Intentar conexión directa a PostgreSQL (puerto 5432 expuesto)
         env = os.environ.copy()
         env['PGPASSWORD'] = 'admin'  # Contraseña por defecto del contenedor OpenVAS
         
+        result = None
+        feed_data = {}
+        
+        # Intentar primero con feed_sync
         comando_directo = f"""psql -h 127.0.0.1 -U postgres -d gvmd -t -A -F'|' -c "{sql_query}" """
         
         result = subprocess.run(
@@ -507,72 +513,65 @@ def verificar_feeds(config, feed_stale_days=30):
                 timeout=10
             )
         
+        # Si feed_sync no existe, intentar otras tablas
         if result.returncode != 0:
-            escribir_log(f"Error al consultar PostgreSQL: {result.stderr}", 'ERROR')
-            return {
-                'status': 'error',
-                'message': f'Error al consultar base de datos: {result.stderr[:100]}',
-                'details': {}
-            }
+            escribir_log(f"Tabla feed_sync no encontrada, intentando alternativas...", 'INFO')
+            
+            # Intentar listar tablas primero para ver qué existe
+            list_tables_query = """SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename LIKE '%feed%' OR tablename LIKE '%info%' OR tablename LIKE '%sync%';"""
+            
+            list_cmd = f"""psql -h 127.0.0.1 -U postgres -d gvmd -t -A -c "{list_tables_query}" """
+            list_result = subprocess.run(list_cmd, shell=True, capture_output=True, text=True, env=env, timeout=10)
+            
+            if list_result.returncode != 0:
+                list_cmd = f"""docker exec {CONTAINER_NAME} sudo -u postgres psql -U postgres -d gvmd -t -A -c "{list_tables_query}" """
+                list_result = subprocess.run(list_cmd, shell=True, capture_output=True, text=True, timeout=10)
+            
+            # Si no encontramos tablas de feeds, usar método alternativo: verificar directorios
+            if list_result.returncode != 0 or not list_result.stdout.strip():
+                escribir_log("No se encontraron tablas de feeds en PostgreSQL, usando verificación de directorios", 'INFO')
+                return verificar_feeds_directorios(config, feed_stale_days)
         
-        # Parsear resultados de la consulta
-        # Formato: type|name|value
-        feed_data = {}
-        for line in result.stdout.strip().split('\n'):
-            if not line or '|' not in line:
-                continue
-            parts = line.split('|', 2)
-            if len(parts) >= 3:
-                feed_type = parts[0].strip()
-                name = parts[1].strip()
-                value = parts[2].strip()
-                
-                if feed_type not in feed_data:
-                    feed_data[feed_type] = {}
-                feed_data[feed_type][name] = value
+        # Parsear resultados de la consulta feed_sync
+        # Formato esperado: feed_type|last_update
+        if result.returncode == 0 and result.stdout.strip():
+            for line in result.stdout.strip().split('\n'):
+                if not line or '|' not in line:
+                    continue
+                parts = line.split('|', 1)
+                if len(parts) >= 2:
+                    feed_type = parts[0].strip()
+                    last_update_str = parts[1].strip()
+                    
+                    try:
+                        # Intentar parsear la fecha
+                        if 'T' in last_update_str:
+                            fecha_actualizacion = datetime.datetime.fromisoformat(last_update_str.replace('Z', '+00:00'))
+                        elif last_update_str.isdigit():
+                            fecha_actualizacion = datetime.datetime.fromtimestamp(int(last_update_str))
+                        else:
+                            fecha_actualizacion = datetime.datetime.strptime(last_update_str, '%Y-%m-%d %H:%M:%S')
+                        
+                        if feed_type not in feed_data:
+                            feed_data[feed_type] = {}
+                        feed_data[feed_type]['last_update'] = fecha_actualizacion
+                    except:
+                        pass
+        
+        # Mapeo de tipos de feeds
+        feed_types = {
+            'NVT': 'NVT',
+            'SCAP': 'SCAP',
+            'CERT': 'CERT',
+            'GVMD_DATA': 'GVMD_DATA'
+        }
         
         # Buscar información de última actualización para cada feed
         for feed_name, feed_type in feed_types.items():
             fecha_actualizacion = None
             
-            if feed_type in feed_data:
-                feed_info = feed_data[feed_type]
-                
-                # Buscar campos que contengan información de fecha
-                # Campos comunes: 'last_update', 'update', 'timestamp', 'modified'
-                for date_field in ['last_update', 'update', 'timestamp', 'modified', 'last_modified']:
-                    if date_field in feed_info:
-                        fecha_str = feed_info[date_field]
-                        try:
-                            # Intentar parsear diferentes formatos de fecha
-                            if 'T' in fecha_str:
-                                # Formato ISO 8601
-                                fecha_str_clean = fecha_str.replace('Z', '+00:00')
-                                fecha_actualizacion = datetime.datetime.fromisoformat(fecha_str_clean)
-                            elif fecha_str.isdigit():
-                                # Timestamp Unix
-                                timestamp = int(fecha_str)
-                                fecha_actualizacion = datetime.datetime.fromtimestamp(timestamp)
-                            else:
-                                # Formato: YYYY-MM-DD HH:MM:SS
-                                fecha_actualizacion = datetime.datetime.strptime(fecha_str, '%Y-%m-%d %H:%M:%S')
-                            break
-                        except:
-                            continue
-                
-                # Si no encontramos fecha en campos específicos, buscar en todos los valores
-                if fecha_actualizacion is None:
-                    for key, value in feed_info.items():
-                        if 'date' in key.lower() or 'time' in key.lower() or 'update' in key.lower():
-                            try:
-                                if 'T' in value:
-                                    fecha_str_clean = value.replace('Z', '+00:00')
-                                    fecha_actualizacion = datetime.datetime.fromisoformat(fecha_str_clean)
-                                elif value.isdigit() and len(value) == 10:
-                                    fecha_actualizacion = datetime.datetime.fromtimestamp(int(value))
-                                break
-                            except:
-                                continue
+            if feed_type in feed_data and 'last_update' in feed_data[feed_type]:
+                fecha_actualizacion = feed_data[feed_type]['last_update']
             
             # Calcular días desde última actualización
             if fecha_actualizacion:
@@ -641,12 +640,115 @@ def verificar_feeds(config, feed_stale_days=30):
             }
                 
     except subprocess.TimeoutExpired:
-        escribir_log("Timeout al consultar base de datos PostgreSQL", 'ERROR')
-        return {'status': 'error', 'message': 'Timeout al consultar base de datos', 'details': {}}
+        escribir_log("Timeout al consultar base de datos PostgreSQL, usando método alternativo", 'WARNING')
+        return verificar_feeds_directorios(config, feed_stale_days)
     except Exception as e:
-        escribir_log(f"Error al verificar feeds: {e}", 'ERROR')
-        import traceback
-        escribir_log(f"Traceback: {traceback.format_exc()}", 'DEBUG')
+        escribir_log(f"Error al consultar PostgreSQL: {e}, usando método alternativo", 'WARNING')
+        return verificar_feeds_directorios(config, feed_stale_days)
+
+def verificar_feeds_directorios(config, feed_stale_days=30):
+    """
+    Método alternativo: Verifica feeds usando fecha de modificación de directorios.
+    Se usa cuando no se puede consultar PostgreSQL.
+    """
+    try:
+        fecha_actual = datetime.datetime.now()
+        feeds_info = {}
+        feeds_stale = []
+        
+        # Rutas de directorios de feeds dentro del contenedor Docker
+        feed_dirs = {
+            'NVT': '/var/lib/openvas/plugins',
+            'SCAP': '/var/lib/gvm/scap-data',
+            'CERT': '/var/lib/gvm/cert-data',
+            'GVMD_DATA': '/var/lib/gvm/data-objects'
+        }
+        
+        # Verificar cada feed usando fecha de modificación del directorio
+        for feed_name, feed_dir in feed_dirs.items():
+            try:
+                result = subprocess.run(
+                    ['docker', 'exec', CONTAINER_NAME, 'stat', '-c', '%Y', feed_dir],
+                    capture_output=True,
+                    text=True,
+                    timeout=10
+                )
+                
+                if result.returncode == 0 and result.stdout.strip():
+                    try:
+                        timestamp = int(result.stdout.strip())
+                        fecha_actualizacion = datetime.datetime.fromtimestamp(timestamp)
+                        dias_desde_actualizacion = (fecha_actual - fecha_actualizacion).days
+                        
+                        feeds_info[feed_name] = {
+                            'fecha': fecha_actualizacion.strftime('%Y-%m-%d %H:%M:%S'),
+                            'dias': dias_desde_actualizacion,
+                            'actualizado': dias_desde_actualizacion < feed_stale_days,
+                            'fuente': 'directorio'
+                        }
+                        
+                        if dias_desde_actualizacion >= feed_stale_days:
+                            feeds_stale.append({
+                                'nombre': feed_name,
+                                'dias': dias_desde_actualizacion,
+                                'fecha': fecha_actualizacion.strftime('%Y-%m-%d %H:%M:%S')
+                            })
+                    except ValueError:
+                        feeds_info[feed_name] = {
+                            'fecha': 'Error al parsear',
+                            'dias': None,
+                            'actualizado': None,
+                            'fuente': 'directorio'
+                        }
+                else:
+                    feeds_info[feed_name] = {
+                        'fecha': 'No disponible',
+                        'dias': None,
+                        'actualizado': None,
+                        'fuente': 'directorio'
+                    }
+            except Exception as e:
+                feeds_info[feed_name] = {
+                    'fecha': f'Error: {str(e)[:50]}',
+                    'dias': None,
+                    'actualizado': None,
+                    'fuente': 'directorio'
+                }
+        
+        # Determinar estado general
+        if feeds_stale:
+            mensaje = f"{len(feeds_stale)} feed(s) desactualizado(s) (>{feed_stale_days} días)"
+            return {
+                'status': 'warning',
+                'message': mensaje,
+                'details': {
+                    'feeds_stale': feeds_stale,
+                    'all_feeds': feeds_info,
+                    'stale_days': feed_stale_days
+                }
+            }
+        elif any(feed.get('actualizado') is None for feed in feeds_info.values()):
+            return {
+                'status': 'warning',
+                'message': 'No se pudo verificar todos los feeds',
+                'details': {
+                    'feeds_stale': [],
+                    'all_feeds': feeds_info,
+                    'stale_days': feed_stale_days
+                }
+            }
+        else:
+            return {
+                'status': 'ok',
+                'message': f'Todos los feeds actualizados (<{feed_stale_days} días)',
+                'details': {
+                    'feeds_stale': [],
+                    'all_feeds': feeds_info,
+                    'stale_days': feed_stale_days
+                }
+            }
+    except Exception as e:
+        escribir_log(f"Error en verificar_feeds_directorios: {e}", 'ERROR')
         return {'status': 'error', 'message': f'Error al verificar feeds: {str(e)}', 'details': {}}
 
 def formatear_mensaje_alerta_completo(resultados, config, timestamp):
