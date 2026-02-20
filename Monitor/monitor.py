@@ -479,24 +479,39 @@ def obtener_fecha_feed(feed_type):
             f"SELECT value FROM info WHERE name LIKE '%feed%{db_name}%' AND name LIKE '%version%' LIMIT 1;"
         ]
         
-        env = os.environ.copy()
-        env['PGPASSWORD'] = 'admin'  # Contraseña por defecto del contenedor OpenVAS
+        escribir_log(f"Feed {feed_type}: Intentando obtener fecha desde PostgreSQL (tabla info)...", 'INFO')
         
+        # Intentar múltiples métodos de conexión (como en el proyecto original)
         for query in queries:
             try:
-                # Intentar conexión directa primero
-                comando = f"""psql -h 127.0.0.1 -U postgres -d gvmd -t -A -c "{query}" """
+                escribir_log(f"Feed {feed_type}: Query: {query[:100]}...", 'DEBUG')
+                
+                # Método 1: Usar sudo -u postgres (como en el proyecto original)
                 result = subprocess.run(
-                    comando,
-                    shell=True,
+                    ['sudo', '-u', 'postgres', 'psql', '-d', 'gvmd', '-t', '-A', '-c', query],
                     capture_output=True,
                     text=True,
-                    env=env,
                     timeout=10
                 )
                 
-                # Si falla, intentar con docker exec
+                # Método 2: Si falla, intentar conexión directa
                 if result.returncode != 0:
+                    escribir_log(f"Feed {feed_type}: Método sudo falló, intentando conexión directa...", 'DEBUG')
+                    env = os.environ.copy()
+                    env['PGPASSWORD'] = 'admin'
+                    comando = f"""psql -h 127.0.0.1 -U postgres -d gvmd -t -A -c "{query}" """
+                    result = subprocess.run(
+                        comando,
+                        shell=True,
+                        capture_output=True,
+                        text=True,
+                        env=env,
+                        timeout=10
+                    )
+                
+                # Método 3: Si falla, intentar con docker exec
+                if result.returncode != 0:
+                    escribir_log(f"Feed {feed_type}: Conexión directa falló, intentando docker exec...", 'DEBUG')
                     comando = f"""docker exec {CONTAINER_NAME} sudo -u postgres psql -U postgres -d gvmd -t -A -c "{query}" """
                     result = subprocess.run(
                         comando,
@@ -508,6 +523,8 @@ def obtener_fecha_feed(feed_type):
                 
                 if result.returncode == 0:
                     value = result.stdout.strip()
+                    escribir_log(f"Feed {feed_type}: Respuesta BD: '{value}'", 'DEBUG')
+                    
                     if value and value != '' and value != '0':
                         escribir_log(f"Feed {feed_type}: Valor encontrado en BD: {value}", 'INFO')
                         # Los valores de versión suelen tener formato de timestamp
@@ -518,13 +535,21 @@ def obtener_fecha_feed(feed_type):
                                 fecha_str = value.split('T')[0]
                                 if len(fecha_str) == 8:  # Asegurar formato correcto
                                     fecha = datetime.datetime.strptime(fecha_str, '%Y%m%d')
-                                    escribir_log(f"Feed {feed_type}: Fecha parseada: {fecha.strftime('%Y-%m-%d')}", 'INFO')
+                                    escribir_log(f"Feed {feed_type}: Fecha parseada desde BD: {fecha.strftime('%Y-%m-%d')}", 'INFO')
                                     return fecha
                         except ValueError as e:
                             escribir_log(f"Feed {feed_type}: Error al parsear fecha '{value}': {e}", 'WARNING')
                             continue
-            except Exception:
+                    else:
+                        escribir_log(f"Feed {feed_type}: Query retornó valor vacío o '0'", 'DEBUG')
+                else:
+                    error_msg = result.stderr[:200] if result.stderr else result.stdout[:200] if result.stdout else 'Sin mensaje'
+                    escribir_log(f"Feed {feed_type}: Query falló: {error_msg}", 'DEBUG')
+            except Exception as e:
+                escribir_log(f"Feed {feed_type}: Excepción en query: {e}", 'DEBUG')
                 continue
+        
+        escribir_log(f"Feed {feed_type}: No se encontró versión en PostgreSQL, usando método de directorio", 'INFO')
     except Exception:
         pass
     
