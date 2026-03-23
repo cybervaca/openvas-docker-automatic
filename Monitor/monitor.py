@@ -30,6 +30,10 @@ MONITOR_CONFIG_PATH = '/opt/gvm/Monitor/config.json'
 LOG_DIR = '/opt/gvm/logs/monitoring'
 LOG_FILE = f'{LOG_DIR}/monitor.log'
 ALERT_COOLDOWN_FILE = f'{LOG_DIR}/alert_cooldown.json'
+AUTO_UPDATE_FEEDS_AFTER_DAYS = 15
+AUTO_UPDATE_COOLDOWN_SECONDS = 24 * 60 * 60  # 24h
+AUTO_UPDATE_COOLDOWN_FILE = f'{LOG_DIR}/auto_update_cooldown.json'
+AUTO_UPDATE_COOLDOWN_KEY = 'feeds'
 CONTAINER_NAME = 'openvas'
 GVM_PORT = 9390
 GSAD_PORT = 9392
@@ -367,6 +371,39 @@ def registrar_alerta_enviada(tipo_alerta):
     cooldown_data = cargar_cooldown()
     cooldown_data[tipo_alerta] = datetime.datetime.now().isoformat()
     guardar_cooldown(cooldown_data)
+
+def cargar_auto_update_cooldown():
+    """Carga el estado de cooldown para auto-update de feeds"""
+    if os.path.exists(AUTO_UPDATE_COOLDOWN_FILE):
+        try:
+            with open(AUTO_UPDATE_COOLDOWN_FILE, 'r') as f:
+                return json.load(f)
+        except:
+            return {}
+    return {}
+
+def guardar_auto_update_cooldown(cooldown_data):
+    """Guarda el estado de cooldown para auto-update de feeds"""
+    os.makedirs(LOG_DIR, exist_ok=True)
+    with open(AUTO_UPDATE_COOLDOWN_FILE, 'w') as f:
+        json.dump(cooldown_data, f)
+
+def puede_ejecutar_auto_update_feeds():
+    """Determina si se puede ejecutar auto-update de feeds (según cooldown)"""
+    cooldown_data = cargar_auto_update_cooldown()
+    if AUTO_UPDATE_COOLDOWN_KEY not in cooldown_data:
+        return True, None
+
+    ultimo_envio = datetime.datetime.fromisoformat(cooldown_data[AUTO_UPDATE_COOLDOWN_KEY])
+    tiempo_transcurrido = (datetime.datetime.now() - ultimo_envio).total_seconds()
+    restante = AUTO_UPDATE_COOLDOWN_SECONDS - tiempo_transcurrido
+    return tiempo_transcurrido >= AUTO_UPDATE_COOLDOWN_SECONDS, max(0, restante)
+
+def registrar_auto_update_feeds():
+    """Registra que se ejecutó un auto-update de feeds"""
+    cooldown_data = cargar_auto_update_cooldown()
+    cooldown_data[AUTO_UPDATE_COOLDOWN_KEY] = datetime.datetime.now().isoformat()
+    guardar_auto_update_cooldown(cooldown_data)
 
 def verificar_contenedor():
     """Verifica si el contenedor Docker está corriendo"""
@@ -1026,6 +1063,73 @@ def ejecutar_verificaciones(config):
         resultados['checks']['feeds'] = feeds['status']
         resultados['feeds_details'] = feeds.get('details', {})
         escribir_log(f"Feeds: {feeds['message']}")
+
+        # Auto-update de feeds si hay alguno con >= 15 días sin actualizar (umbral fijo).
+        all_feeds = resultados.get('feeds_details', {}).get('all_feeds', {}) or {}
+        max_days = None
+        for feed_info in all_feeds.values():
+            dias = feed_info.get('dias')
+            if dias is not None:
+                max_days = dias if max_days is None else max(max_days, dias)
+
+        resultados['auto_update_feeds'] = {
+            'ran': False,
+            'status': 'skipped',
+            'reason': None,
+            'max_days': max_days
+        }
+
+        if max_days is not None and max_days >= AUTO_UPDATE_FEEDS_AFTER_DAYS:
+            puede_ejecutar, restante = puede_ejecutar_auto_update_feeds()
+
+            if puede_ejecutar:
+                escribir_log(
+                    f"Auto-update feeds: max_days={max_days} >= {AUTO_UPDATE_FEEDS_AFTER_DAYS}. Ejecutando Cron/actualiza_gvm.sh...",
+                    'INFO'
+                )
+                try:
+                    proc = subprocess.run(
+                        ['/bin/bash', '/opt/gvm/Cron/actualiza_gvm.sh'],
+                        capture_output=True,
+                        text=True,
+                        timeout=3600
+                    )
+
+                    registrar_auto_update_feeds()
+                    resultados['auto_update_feeds']['ran'] = True
+
+                    if proc.returncode == 0:
+                        resultados['auto_update_feeds']['status'] = 'ok'
+                        resultados['auto_update_feeds']['reason'] = 'Actualización realizada'
+                        escribir_log("Auto-update feeds: OK", 'INFO')
+                    else:
+                        resultados['auto_update_feeds']['status'] = 'error'
+                        resultados['auto_update_feeds']['reason'] = f"exit code {proc.returncode}"
+                        escribir_log(f"Auto-update feeds: ERROR (exit code {proc.returncode})", 'ERROR')
+
+                        stderr = (proc.stderr or '').strip()
+                        if stderr:
+                            escribir_log(f"Auto-update feeds stderr (head): {stderr[:500]}", 'ERROR')
+                except subprocess.TimeoutExpired:
+                    registrar_auto_update_feeds()
+                    resultados['auto_update_feeds']['ran'] = True
+                    resultados['auto_update_feeds']['status'] = 'error'
+                    resultados['auto_update_feeds']['reason'] = 'timeout'
+                    escribir_log("Auto-update feeds: ERROR (timeout ejecutando actualiza_gvm.sh)", 'ERROR')
+                except Exception as e:
+                    registrar_auto_update_feeds()
+                    resultados['auto_update_feeds']['ran'] = True
+                    resultados['auto_update_feeds']['status'] = 'error'
+                    resultados['auto_update_feeds']['reason'] = str(e)[:120]
+                    escribir_log(f"Auto-update feeds: ERROR ({str(e)})", 'ERROR')
+            else:
+                resultados['auto_update_feeds']['status'] = 'skipped'
+                resultados['auto_update_feeds']['reason'] = f"cooldown activo ({int(restante)}s restantes)"
+                escribir_log(
+                    f"Auto-update feeds: cooldown activo, se omite ({int(restante)}s restantes)",
+                    'INFO'
+                )
+
         if feeds['status'] == 'warning':
             resultados['status'] = 'warning' if resultados['status'] == 'ok' else resultados['status']
         elif feeds['status'] == 'error':

@@ -287,6 +287,14 @@ Para evitar spam de alertas, el servicio implementa un sistema de cooldown:
 - El estado se guarda en `/opt/gvm/logs/monitoring/alert_cooldown.json`
 - Por defecto: 3600 segundos (1 hora) entre alertas del mismo tipo
 
+### Auto-actualización de Feeds
+
+Además de las alertas, el monitor puede intentar actualizar los feeds automáticamente si detecta que algún feed lleva `>= 15` días sin actualizarse.
+
+- El auto-update se ejecuta llamando a `/opt/gvm/Cron/actualiza_gvm.sh` (Docker-only).
+- Para evitar ejecuciones repetidas cada pocos minutos, existe un cooldown separado de `24h`.
+- El estado del cooldown se guarda en `/opt/gvm/logs/monitoring/auto_update_cooldown.json`.
+
 ## Verificaciones Realizadas
 
 El servicio verifica los siguientes aspectos:
