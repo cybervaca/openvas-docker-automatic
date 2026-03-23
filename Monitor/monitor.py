@@ -965,7 +965,7 @@ def formatear_mensaje_alerta_completo(resultados, config, timestamp):
             'gvmd': "🛡️ GVM: Verificar logs con 'docker logs openvas'",
             'gsad': "🌐 GSAD: Verificar que el puerto 9392 esté accesible",
             'gvm_connection': "🔌 Conexión: Verificar credenciales y que GVM esté funcionando",
-            'feeds': "📦 Feeds: Ejecutar '/opt/gvm/Cron/actualiza_gvm.sh' o 'greenbone-feed-sync'"
+            'feeds': "📦 Feeds: Ejecutar '/opt/gvm/Cron/actualiza_gvm.sh'"
         }
         
         for check_name, status in checks.items():

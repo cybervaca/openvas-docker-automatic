@@ -277,7 +277,7 @@ Estado de todos los feeds:
 ⚠️ SCAP: 32 días (Última: 2023-12-13 10:20:00)
 
 ACCIONES RECOMENDADAS:
-📦 Feeds: Ejecutar '/opt/gvm/Cron/actualiza_gvm.sh' o 'greenbone-feed-sync'
+📦 Feeds: Ejecutar '/opt/gvm/Cron/actualiza_gvm.sh'
 ```
 
 ### Sistema de Cooldown
