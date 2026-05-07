@@ -1,5 +1,23 @@
 # Changelog
 
+## [2.5.5] - 2026-05-07
+
+### Añadido
+- **Importación de exclusiones en targets** - `Targets_Tasks/set-tt.py` ahora aplica exclusiones al crear targets
+  - Soporta columna opcional `Exclusiones` en `openvas.csv`
+  - Usa `/opt/gvm/Reports/exclusion.csv` como fallback si no hay exclusiones en el CSV de entrada
+  - Aplica exclusiones con `exclude_hosts` durante la creación del target
+  - Registra las exclusiones aplicadas en `log.txt`
+
+### Mejorado
+- **Exportación de targets compatible con importación** - `Targets_Tasks/export-target.py` ahora exporta `Titulo;Rango;Desc;Exclusiones`
+  - Extrae exclusiones existentes desde los targets de OpenVAS
+  - Genera CSV reimportable directamente por `set-tt.py`
+- **Ejemplo CSV actualizado** - `Targets_Tasks/openvas.csv.example` documenta la columna `Exclusiones`
+
+### Documentación
+- `Monitor/README.md` actualizado para aclarar el auto-update de feeds con `actualiza_gvm.sh`
+
 ## [2.5.4] - 2026-01-30
 
 ### Añadido

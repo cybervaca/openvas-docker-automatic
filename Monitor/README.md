@@ -325,6 +325,8 @@ El servicio verifica los siguientes aspectos:
    - Usa el protocolo GMP para obtener información de feeds
    - Calcula días desde última actualización
    - Alerta si algún feed tiene más de 30 días sin actualizar (configurable con `feed_stale_days`)
+   - Ejecuta `/opt/gvm/Cron/actualiza_gvm.sh` automáticamente si algún feed lleva `>= 15` días sin actualizar
+   - Evita ejecuciones repetidas con un cooldown separado de `24h`
 
 7. **Actualización de Imagen:**
    - Verifica si hay actualizaciones disponibles para `immauss/openvas:latest`

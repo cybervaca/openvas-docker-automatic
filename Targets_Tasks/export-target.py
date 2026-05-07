@@ -10,10 +10,26 @@ import os
 from gvm.connections import TLSConnection
 from gvm.protocols.gmp import Gmp
 
+def get_excluded_hosts(target) -> str:
+    """
+    Extrae exclusiones del XML de target en un formato compatible con set-tt.py.
+    """
+    exclusions = []
+    seen = set()
+    for tag in ["exclude", "exclude_hosts", "hosts_excluded"]:
+        exclusions_elem = target.find(f".//{tag}")
+        if exclusions_elem is not None and exclusions_elem.text:
+            for item in exclusions_elem.text.split(','):
+                excluded_host = item.strip()
+                if excluded_host and excluded_host not in seen:
+                    exclusions.append(excluded_host)
+                    seen.add(excluded_host)
+    return ",".join(exclusions)
+
 def export_targets_csv(config_path: str, csv_path: str, page_size: int = 1000) -> None:
     """
     Exporta todos los targets de OpenVAS en formato CSV, evitando el límite de 1 000 filas
-    mediante paginación. El CSV tendrá columnas Titulo;Rango;Desc.
+    mediante paginación. El CSV tendrá columnas Titulo;Rango;Desc;Exclusiones.
     """
     # Cargar credenciales
     with open(config_path, 'r', encoding='utf-8') as f:
@@ -46,11 +62,12 @@ def export_targets_csv(config_path: str, csv_path: str, page_size: int = 1000) -
     # Escribir el CSV
     with open(csv_path, 'w', newline='', encoding='utf-8') as f_out:
         writer = csv.writer(f_out, delimiter=';')
-        writer.writerow(["Titulo", "Rango", "Desc"])
+        writer.writerow(["Titulo", "Rango", "Desc", "Exclusiones"])
         for target in all_targets:
             titulo = (target.findtext("name") or "").strip()
             rangos_str = (target.findtext("hosts") or "").strip()
             desc = (target.findtext("comment") or "").strip()
+            exclusiones = get_excluded_hosts(target)
             titulo = " ".join(titulo.split())
             desc = " ".join(desc.split())
             
@@ -58,10 +75,10 @@ def export_targets_csv(config_path: str, csv_path: str, page_size: int = 1000) -
             if rangos_str:
                 rangos = [r.strip() for r in rangos_str.split(',') if r.strip()]
                 for rango in rangos:
-                    writer.writerow([titulo, rango, desc])
+                    writer.writerow([titulo, rango, desc, exclusiones])
             else:
                 # Si no hay rangos, escribir una fila vacía
-                writer.writerow([titulo, "", desc])
+                writer.writerow([titulo, "", desc, exclusiones])
     
     return len(all_targets)
 
