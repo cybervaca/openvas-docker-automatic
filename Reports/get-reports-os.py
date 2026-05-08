@@ -22,6 +22,8 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
 from email import encoders
 
+GVM_CONNECTION_TIMEOUT = 900  # Reportes grandes pueden tardar varios minutos en descargarse.
+
 def leer_configuracion():
     try:
         with open('/opt/gvm/Config/config.json', 'r') as archivo:
@@ -64,7 +66,7 @@ def get_pass():
 
 def connect_gvm():
     # Conexión TLS a GVM
-    connection = TLSConnection(hostname="127.0.0.1", port=9390)
+    connection = TLSConnection(hostname="127.0.0.1", port=9390, timeout=GVM_CONNECTION_TIMEOUT)
     return connection
 
 

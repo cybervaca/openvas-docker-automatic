@@ -1,5 +1,16 @@
 # Changelog
 
+## [2.5.6] - 2026-05-08
+
+### Corregido
+- **Timeout descargando reportes grandes** - Aumentado el timeout TLS de GVM a 15 minutos en los scripts de reportes
+  - Evita `TimeoutError: The read operation timed out` durante `gmp.get_report()`
+  - Afecta a `Reports/get-reports-test.py`, `Reports/get-reports-os.py`, `Reports/get-reports-unico.py` y `Reports/get-reports.py`
+  - Mantiene el flujo de descarga por GMP, pero da más margen a reportes CSV grandes con `details=True`
+
+### Documentación
+- `Monitor/README.md` actualizado con una nota de troubleshooting para timeouts descargando reportes
+
 ## [2.5.5] - 2026-05-07
 
 ### Añadido

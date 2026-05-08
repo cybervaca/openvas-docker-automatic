@@ -15,6 +15,8 @@ import csv, json
 from os import path
 import datetime
 
+GVM_CONNECTION_TIMEOUT = 900  # Reportes grandes pueden tardar varios minutos en descargarse.
+
 def get_pass():
     password = getpass.getpass(prompt="Enter password: ")
     return password
@@ -22,7 +24,7 @@ def get_pass():
 
 def connect_gvm():
     # Conexión TLS a GVM
-    connection = TLSConnection(hostname="127.0.0.1", port=9390)
+    connection = TLSConnection(hostname="127.0.0.1", port=9390, timeout=GVM_CONNECTION_TIMEOUT)
     return connection
 
 

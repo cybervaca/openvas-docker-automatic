@@ -25,6 +25,7 @@ import ipaddress
 
 REPORTS_DIR = "/opt/gvm/Reports"
 CSV_FILE = os.path.join(REPORTS_DIR, "exclusion.csv")
+GVM_CONNECTION_TIMEOUT = 900  # Reportes grandes pueden tardar varios minutos en descargarse.
 
 # Función para leer la configuración
 def leer_configuracion():
@@ -90,7 +91,7 @@ def get_pass():
 # Función para conectarse a GVM
 def connect_gvm():
     # Conexión TLS a GVM
-    connection = TLSConnection(hostname="127.0.0.1", port=9390)
+    connection = TLSConnection(hostname="127.0.0.1", port=9390, timeout=GVM_CONNECTION_TIMEOUT)
     return connection
 
 # Función para preparar el reporte

@@ -391,6 +391,14 @@ El servicio verifica los siguientes aspectos:
    - El script de instalación configura esto automáticamente
    - Si hay problemas, verifica: `groups redteam` (debe incluir `docker`)
 
+### Timeout al descargar reportes grandes
+
+Si durante `run_task.sh` aparece `TimeoutError: The read operation timed out` en `gmp.get_report()`, normalmente significa que el reporte CSV es grande y tarda más de lo esperado en descargarse desde GVM.
+
+- Los scripts de reportes usan ahora un timeout TLS de `900` segundos (15 minutos).
+- Si el error persiste, revisa recursos del contenedor (`CPU/RAM`) y el tamaño del reporte generado.
+- El punto más habitual del error es `Reports/get-reports-test.py` durante la llamada a `gmp.get_report()`.
+
 ## Desinstalación
 
 Para desinstalar el servicio:

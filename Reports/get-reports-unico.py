@@ -24,6 +24,8 @@ from email import encoders
 import ipaddress
 import argparse
 
+GVM_CONNECTION_TIMEOUT = 900  # Reportes grandes pueden tardar varios minutos en descargarse.
+
 parser = argparse.ArgumentParser(description="Para extraer un solo reporte")
 parser.add_argument("name", type=str, help="Pasa el ID de la task o el nombre completo ")
 
@@ -91,7 +93,7 @@ def get_pass():
 # Función para conectarse a GVM
 def connect_gvm():
     # Conexión TLS a GVM
-    connection = TLSConnection(hostname="127.0.0.1", port=9390)
+    connection = TLSConnection(hostname="127.0.0.1", port=9390, timeout=GVM_CONNECTION_TIMEOUT)
     return connection
 
 # Función para preparar el reporte
