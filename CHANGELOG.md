@@ -1,5 +1,15 @@
 # Changelog
 
+## [2.5.8] - 2026-05-08
+
+### Mejorado
+- **Exportación paralela de reportes** - `Reports/get-reports-test.py` ahora exporta reports con 5 threads
+  - Cada thread usa su propia conexión TLS/GMP para evitar compartir estado
+  - Exporta solo el último reporte de cada task finalizada (`last_report`)
+  - Evita recorrer todos los reports históricos con `get_reports(rows=1000)`
+  - Si un reporte falla, se omite y el resto continúa
+  - Se omiten CSV ausentes, vacíos o ilegibles durante la unificación
+
 ## [2.5.7] - 2026-05-08
 
 ### Añadido

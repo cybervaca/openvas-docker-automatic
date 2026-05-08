@@ -26,12 +26,14 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
 from email import encoders
 import ipaddress
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 REPORTS_DIR = "/opt/gvm/Reports"
 CSV_FILE = os.path.join(REPORTS_DIR, "exclusion.csv")
 GVM_CONNECTION_TIMEOUT = 900  # Reportes grandes pueden tardar varios minutos en descargarse.
 MONITOR_CONFIG_PATH = "/opt/gvm/Monitor/config.json"
 SHAREPOINT_UPLOAD_SCRIPT = "/opt/gvm/Reports/subida_share.py"
+REPORT_EXPORT_WORKERS = 5
 
 # Función para leer la configuración
 def leer_configuracion():
@@ -257,6 +259,46 @@ def connect_gvm():
     connection = TLSConnection(hostname="127.0.0.1", port=9390, timeout=GVM_CONNECTION_TIMEOUT)
     return connection
 
+def export_single_report(report_info, user, password, reportformat, export):
+    """Exporta un único reporte usando una conexión GMP dedicada para el thread."""
+    reportID = report_info["report_id"]
+    task_id = report_info["task_id"]
+    name = report_info["task_name"]
+    print("Report ID:", reportID)
+    print("Task ID:", task_id)
+    print("Task Name:", name)
+    print("\n")
+    print("########{0}-{1}########".format(reportID, name))
+
+    try:
+        with Gmp(connection=connect_gvm()) as gmp:
+            gmp.authenticate(user, password)
+            reportscv = gmp.get_report(
+                report_id=reportID,
+                report_format_id=reportformat,
+                filter_string="apply_overrides=1 min_qod=70 severity>0",
+                ignore_pagination=True,
+                details=True,
+            )
+
+        obj = untangle.parse(reportscv)
+        resultID = obj.get_reports_response.report["id"]
+        base64CVSData = obj.get_reports_response.report.cdata
+        data = str(base64.b64decode(base64CVSData), "utf-8")
+        fichero = "{0}/{1}.csv".format(export, resultID)
+
+        if noexiste(fichero):
+            guardar(fichero, data)
+
+        if os.path.exists(fichero) and os.path.getsize(fichero) > 0:
+            return fichero
+
+        print(f"ADVERTENCIA: No se generó correctamente el fichero {fichero}; se omite")
+        return None
+    except Exception as e:
+        print(f"ADVERTENCIA: Falló export de reporte {reportID} ({name}); se omite: {e}")
+        return None
+
 # Función para preparar el reporte
 def ready_report(connection, user, password, reportformat, host):
     export = "/opt/gvm/Reports/exports"
@@ -269,44 +311,42 @@ def ready_report(connection, user, password, reportformat, host):
         print(f"Status: {status}")
         print(f"Version: {version}")
         gmp.authenticate(user, password)
-        respuesta = gmp.get_reports(filter_string='rows=1000')
+        # Exportar solo el último reporte de cada tarea finalizada. Esto evita
+        # recorrer todos los reports históricos y acelera mucho el export.
+        respuesta = gmp.get_tasks(filter_string='status="Done" rows=-1')
         result_dict = {}
         root = ET.fromstring(respuesta)
-        reports = root.findall(".//report")
-        for report in reports:
-            report_id = report.get("id")
-            task = report.find(".//task")
+        tasks = root.findall(".//task")
+        for task in tasks:
             task_id = task.get("id")
-            task_name = task.find("name").text
+            task_name = task.findtext("name")
+            report = task.find(".//last_report/report")
+            if report is None:
+                continue
+            report_id = report.get("id")
+            if not report_id:
+                continue
             result_dict[report_id] = {
                 "report_id": report_id,
                 "task_id": task_id,
                 "task_name": task_name,
             }
-        for key, value in result_dict.items():
-            print("Report ID:", value["report_id"])
-            print("Task ID:", value["task_id"])
-            print("Task Name:", value["task_name"])
-            print("\n")
-            reportID = value["report_id"]
-            name = value["task_name"]
-            reportFormatID = reportformat
-            print("########{0}-{1}########".format(reportID, name))
-            reportscv = gmp.get_report(
-                report_id=reportID,
-                report_format_id=reportFormatID,
-                filter_string="apply_overrides=1 min_qod=70 severity>0",
-                ignore_pagination=True,
-                details=True,
-            )
-            obj = untangle.parse(reportscv)
-            resultID = obj.get_reports_response.report["id"]
-            base64CVSData = obj.get_reports_response.report.cdata
-            data = str(base64.b64decode(base64CVSData), "utf-8")
-            fichero = "{0}/{1}.csv".format(export, resultID)
-            if noexiste(fichero):
-                guardar(fichero, data)
-                files.append(fichero)
+
+        if not result_dict:
+            print("No se encontraron reportes finalizados para exportar")
+            return
+
+        print(f"Exportando {len(result_dict)} reportes con {REPORT_EXPORT_WORKERS} threads...")
+        with ThreadPoolExecutor(max_workers=REPORT_EXPORT_WORKERS) as executor:
+            futures = [
+                executor.submit(export_single_report, value, user, password, reportformat, export)
+                for value in result_dict.values()
+            ]
+            for future in as_completed(futures):
+                fichero = future.result()
+                if fichero:
+                    files.append(fichero)
+
         if files:
             delete_duplicates(files, export, host)
         else:
@@ -322,6 +362,7 @@ def noexiste(fichero):
 
 # Función para guardar datos en un fichero
 def guardar(fichero, data):
+    os.makedirs(os.path.dirname(fichero), exist_ok=True)
     with open(fichero, "w") as f:
         f.write(data)
 
@@ -362,7 +403,19 @@ def delete_duplicates(files, export, host):
     nombre_archivo = f"{export}/{year:04d}_{month:02d}_{day:02d}_{hour:02d}_{minute:02d}.csv"
     dataframes = []
     for file in files:
-        dataframes.append(pd.read_csv(file))
+        if not os.path.exists(file):
+            print(f"ADVERTENCIA: Fichero de reporte no encontrado, se omite: {file}")
+            continue
+        if os.path.getsize(file) == 0:
+            print(f"ADVERTENCIA: Fichero de reporte vacío, se omite: {file}")
+            continue
+        try:
+            dataframes.append(pd.read_csv(file))
+        except Exception as e:
+            print(f"ADVERTENCIA: No se pudo leer {file}, se omite: {e}")
+    if not dataframes:
+        print("No hay ficheros CSV válidos para unificar")
+        return
     columnas = ["IP", "Hostname", "Port", "Port Protocol", "CVSS", "NVT Name", "Summary", "Specific Result", "CVEs", "Solution"]
     dataframe = pd.concat(dataframes, ignore_index=True)[columnas]
     dataframe = dataframe.drop_duplicates()
