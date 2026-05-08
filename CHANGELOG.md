@@ -1,5 +1,18 @@
 # Changelog
 
+## [2.5.7] - 2026-05-08
+
+### Añadido
+- **Alertas Telegram para fallos de SharePoint** - `Reports/get-reports-test.py` ahora avisa si falla una subida
+  - Detecta fallos de `subida_share.py` comprobando el `returncode`
+  - Envía Telegram con país, site, región, scope, fase, archivo, destino, `stdout` y `stderr`
+  - Cubre subida de reportes CSV/XLSX y `exclusion.csv`
+  - Reutiliza `monitoring.telegram` de `/opt/gvm/Config/config.json`
+  - Soporta el túnel SOCKS opcional de `/opt/gvm/Monitor/config.json`
+
+### Documentación
+- `Monitor/README.md` actualizado con la nueva alerta por fallo de subida a SharePoint
+
 ## [2.5.6] - 2026-05-08
 
 ### Corregido

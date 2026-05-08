@@ -246,6 +246,7 @@ El servicio envía alertas formateadas con emojis para identificar el tipo:
 - 🔌 **Conexión GVM:** No se puede conectar a GVM vía TLS
 - 📦 **Feeds:** Los feeds de vulnerabilidades están desactualizados (>30 días)
 - 🔄 **Imagen:** Hay una actualización disponible para la imagen Docker
+- 📤 **SharePoint:** Falló la subida de reportes o exclusiones a SharePoint
 
 ### Ejemplo de Mensaje
 
@@ -279,6 +280,25 @@ Estado de todos los feeds:
 ACCIONES RECOMENDADAS:
 📦 Feeds: Ejecutar '/opt/gvm/Cron/actualiza_gvm.sh'
 ```
+
+**Alerta de Subida a SharePoint:**
+```
+ALERTA: Fallo subida SharePoint OpenVAS
+
+País: PUERTO_RICO
+Site: Puerto_Rico
+Región: NORTE
+Scope: INTERNAL
+Fase: reporte xlsx
+Archivo: /opt/gvm/Reports/exports/vulns_host/2026_05_08_10_30.xlsx
+Destino: Openvas_Interno
+Return code: 1
+
+STDERR:
+[ERROR] Falló subida: 403 ...
+```
+
+Estas alertas se generan desde `Reports/get-reports-test.py` cuando falla `subida_share.py` al subir reportes CSV/XLSX o `exclusion.csv`. Usan la misma configuración `monitoring.telegram` de `/opt/gvm/Config/config.json` y el túnel SOCKS opcional de `/opt/gvm/Monitor/config.json`.
 
 ### Sistema de Cooldown
 

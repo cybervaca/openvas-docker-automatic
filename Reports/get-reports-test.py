@@ -17,6 +17,10 @@ import datetime
 import subprocess
 import shutil
 import smtplib
+import socket
+import time
+import html
+import requests
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
@@ -26,6 +30,8 @@ import ipaddress
 REPORTS_DIR = "/opt/gvm/Reports"
 CSV_FILE = os.path.join(REPORTS_DIR, "exclusion.csv")
 GVM_CONNECTION_TIMEOUT = 900  # Reportes grandes pueden tardar varios minutos en descargarse.
+MONITOR_CONFIG_PATH = "/opt/gvm/Monitor/config.json"
+SHAREPOINT_UPLOAD_SCRIPT = "/opt/gvm/Reports/subida_share.py"
 
 # Función para leer la configuración
 def leer_configuracion():
@@ -39,6 +45,163 @@ def leer_configuracion():
         print(f"Error al decodificar el archivo JSON: {e}")
     except Exception as e:
         print(f"Ocurrió un error: {e}")
+
+def leer_configuracion_monitor():
+    """Lee configuración opcional del monitor (túnel SOCKS para Telegram)."""
+    try:
+        if os.path.exists(MONITOR_CONFIG_PATH):
+            with open(MONITOR_CONFIG_PATH, 'r') as archivo:
+                return json.load(archivo)
+    except Exception as e:
+        print(f"[WARNING] No se pudo leer {MONITOR_CONFIG_PATH}: {e}")
+    return {}
+
+def truncate_text(value, max_chars=1200):
+    text = (value or "").strip()
+    if len(text) <= max_chars:
+        return text
+    return text[:max_chars] + "... [truncado]"
+
+def crear_tunel_ssh_socks(config_monitor):
+    """Crea un túnel SOCKS temporal para Telegram si está configurado."""
+    ssh_config = config_monitor.get('ssh_tunnel', {})
+    if not ssh_config.get('enabled', False):
+        return None
+
+    vps_host = ssh_config.get('vps_host')
+    vps_port = ssh_config.get('vps_port', 22)
+    vps_user = ssh_config.get('vps_user')
+    ssh_key = ssh_config.get('ssh_key_path')
+    socks_host = ssh_config.get('socks_host', '127.0.0.1')
+    socks_port = ssh_config.get('socks_port', 1080)
+
+    if not vps_host or not vps_user:
+        print("[WARNING] Túnel SOCKS habilitado pero incompleto; Telegram se intentará sin proxy")
+        return None
+
+    cmd = [
+        "ssh",
+        "-N",
+        "-D", f"{socks_host}:{socks_port}",
+        "-o", "StrictHostKeyChecking=no",
+        "-o", "ExitOnForwardFailure=yes",
+    ]
+    if ssh_key:
+        cmd.extend(["-i", ssh_key])
+    cmd.append(f"{vps_user}@{vps_host}")
+    if vps_port:
+        cmd.extend(["-p", str(vps_port)])
+
+    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    for _ in range(10):
+        if process.poll() is not None:
+            stderr = process.stderr.read().decode("utf-8", errors="ignore")
+            print(f"[WARNING] No se pudo crear túnel SOCKS: {stderr}")
+            return None
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(1)
+            if sock.connect_ex((socks_host, int(socks_port))) == 0:
+                sock.close()
+                return process
+            sock.close()
+        except Exception:
+            pass
+        time.sleep(0.5)
+
+    process.terminate()
+    print("[WARNING] Timeout creando túnel SOCKS para Telegram")
+    return None
+
+def enviar_telegram_alerta_sharepoint(configuracion, mensaje):
+    """Envía alerta Telegram usando la misma configuración que el monitor."""
+    monitoring = (configuracion or {}).get('monitoring', {})
+    telegram = monitoring.get('telegram', {})
+    bot_token = telegram.get('bot_token')
+    chat_id = telegram.get('chat_id')
+
+    if not bot_token or not chat_id:
+        print("[WARNING] Telegram no configurado; no se envía alerta de SharePoint")
+        return False
+
+    config_monitor = leer_configuracion_monitor()
+    ssh_process = crear_tunel_ssh_socks(config_monitor)
+    ssh_config = config_monitor.get('ssh_tunnel', {})
+    proxies = None
+    if ssh_process is not None:
+        socks_host = ssh_config.get('socks_host', '127.0.0.1')
+        socks_port = ssh_config.get('socks_port', 1080)
+        proxies = {
+            'http': f'socks5://{socks_host}:{socks_port}',
+            'https': f'socks5://{socks_host}:{socks_port}'
+        }
+
+    try:
+        response = requests.post(
+            f"https://api.telegram.org/bot{bot_token}/sendMessage",
+            json={
+                'chat_id': str(chat_id),
+                'text': mensaje,
+                'parse_mode': 'HTML'
+            },
+            proxies=proxies,
+            timeout=30
+        )
+        response.raise_for_status()
+        print("[OK] Alerta Telegram enviada por fallo de SharePoint")
+        return True
+    except Exception as e:
+        print(f"[ERROR] No se pudo enviar alerta Telegram: {e}")
+        return False
+    finally:
+        if ssh_process is not None:
+            ssh_process.terminate()
+
+def format_sharepoint_failure_message(configuracion, file_path, pais, automatizacion, fase, result):
+    site = (configuracion or {}).get('site', 'N/A')
+    region = (configuracion or {}).get('region', 'N/A')
+    scope = (configuracion or {}).get('scope', 'N/A')
+    stderr = html.escape(truncate_text(result.stderr))
+    stdout = html.escape(truncate_text(result.stdout))
+    return (
+        "<b>ALERTA: Fallo subida SharePoint OpenVAS</b>\n\n"
+        f"<b>País:</b> {html.escape(str(pais))}\n"
+        f"<b>Site:</b> {html.escape(str(site))}\n"
+        f"<b>Región:</b> {html.escape(str(region))}\n"
+        f"<b>Scope:</b> {html.escape(str(scope))}\n"
+        f"<b>Fase:</b> {html.escape(str(fase))}\n"
+        f"<b>Archivo:</b> <code>{html.escape(str(file_path))}</code>\n"
+        f"<b>Destino:</b> {html.escape(str(automatizacion))}\n"
+        f"<b>Return code:</b> {result.returncode}\n\n"
+        f"<b>STDERR:</b>\n<code>{stderr or 'N/A'}</code>\n\n"
+        f"<b>STDOUT:</b>\n<code>{stdout or 'N/A'}</code>"
+    )
+
+def upload_sharepoint_or_alert(file_path, pais, automatizacion, fase, configuracion):
+    """Sube a SharePoint y envía Telegram si falla."""
+    result = subprocess.run([
+        "python3", SHAREPOINT_UPLOAD_SCRIPT,
+        "-f", file_path,
+        "-p", pais,
+        "-a", automatizacion
+    ], capture_output=True, text=True)
+
+    if result.returncode == 0:
+        if result.stdout:
+            print(result.stdout)
+        return True
+
+    print(f"[ERROR] Fallo subida SharePoint ({fase}): {result.stderr}")
+    mensaje = format_sharepoint_failure_message(
+        configuracion,
+        file_path,
+        pais,
+        automatizacion,
+        fase,
+        result
+    )
+    enviar_telegram_alerta_sharepoint(configuracion, mensaje)
+    return False
 
 # Función para enviar correo electrónico
 def email(configuracion):
@@ -211,12 +374,8 @@ def delete_duplicates(files, export, host):
     #subprocess.run(["python3", "/opt/gvm/Reports/upload-reports.py"] + [file_unif])
     #fin externa
     #enviamos sharepoint
-    subprocess.run(["python3", "/opt/gvm/Reports/subida_share.py", "-f", file_unif, 
-    "-p", pais, 
-    "-a", 'Openvas_Interno'])
-    subprocess.run(["python3", "/opt/gvm/Reports/subida_share.py", "-f", file_excel,  
-    "-p", pais,
-    "-a", 'Openvas_Interno'])
+    upload_sharepoint_or_alert(file_unif, pais, 'Openvas_Interno', 'reporte csv', configuracion)
+    upload_sharepoint_or_alert(file_excel, pais, 'Openvas_Interno', 'reporte xlsx', configuracion)
     separar_cve(file_unif)
 
 # Función para separar CVEs y misconfiguraciones
@@ -462,9 +621,8 @@ def get_tasks_and_exclusions(connection, user, password, pais):
                     writer.writeheader()
                 writer.writerows(new_records)
                 
-        subprocess.run(["python3", "/opt/gvm/Reports/subida_share.py", "-f", CSV_FILE, 
-        "-p", pais, 
-        "-a", 'Openvas_Interno'])
+        configuracion = leer_configuracion()
+        upload_sharepoint_or_alert(CSV_FILE, pais, 'Openvas_Interno', 'exclusion.csv', configuracion)
 
 if __name__ == "__main__":
     dir_csv = '/opt/gvm/Reports/exports/'
