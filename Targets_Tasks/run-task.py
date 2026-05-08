@@ -18,6 +18,8 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
 from email import encoders
 
+GVM_CONNECTION_TIMEOUT = 900  # Listar muchas tareas/reportes puede tardar más de 60s.
+
 def leer_configuracion():
     try:
         with open('/opt/gvm/Config/config.json', 'r') as archivo:
@@ -101,7 +103,7 @@ def email(file1, file2, configuracion):
 
 def connect_gvm():
     # Conexión TLS a GVM
-    connection = TLSConnection(hostname="127.0.0.1", port=9390)
+    connection = TLSConnection(hostname="127.0.0.1", port=9390, timeout=GVM_CONNECTION_TIMEOUT)
     return connection
 
 
@@ -180,7 +182,14 @@ def ejecutar_operacion_gmp(operacion_func, user, password, max_intentos=3, delay
                     continue
             # Si no es un error de conexión o se agotaron los intentos, relanzar
             raise
-        except Exception as e:
+        except TimeoutError as e:
+            ultimo_error = e
+            if intento < max_intentos:
+                print(f"⚠️  Timeout leyendo respuesta GVM (intento {intento}/{max_intentos}). Reintentando en {delay}s...")
+                time.sleep(delay)
+                continue
+            raise
+        except Exception:
             # Para otros errores, no reintentar
             raise
     
