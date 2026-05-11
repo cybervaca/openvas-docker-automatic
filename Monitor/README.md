@@ -246,7 +246,7 @@ El servicio envía alertas formateadas con emojis para identificar el tipo:
 - 🔌 **Conexión GVM:** No se puede conectar a GVM vía TLS
 - 📦 **Feeds:** Los feeds de vulnerabilidades están desactualizados (>30 días)
 - 🔄 **Imagen:** Hay una actualización disponible para la imagen Docker
-- 📤 **SharePoint:** Falló la subida de reportes o exclusiones a SharePoint
+- 📤 **SharePoint:** Falló la subida de los **reportes principales** (CSV/XLSX) a SharePoint. **`exclusion.csv` no genera alerta** (muchas instalaciones no tienen exclusiones): `subida_share.py` sale con éxito si falta o está vacío, y `get-reports-test.py` no envía Telegram para esa fase.
 
 ### Ejemplo de Mensaje
 
@@ -298,7 +298,7 @@ STDERR:
 [ERROR] Falló subida: 403 ...
 ```
 
-Estas alertas se generan desde `Reports/get-reports-test.py` cuando falla `subida_share.py` al subir reportes CSV/XLSX o `exclusion.csv`. Usan la misma configuración `monitoring.telegram` de `/opt/gvm/Config/config.json` y el túnel SOCKS opcional de `/opt/gvm/Monitor/config.json`.
+Estas alertas se generan desde `Reports/get-reports-test.py` cuando falla `subida_share.py` al subir los **reportes CSV/XLSX** (fases `reporte csv` / `reporte xlsx`). **`exclusion.csv` no debe disparar Telegram**: si no hay exclusiones el fichero puede no existir; entonces `subida_share.py` responde **código 0** con un `[INFO]`, y `get-reports-test.py` **no llama a Telegram** para esa fase aunque hubiera otro fallo de subida del CSV de exclusiones. Si tras un `git pull` siguen alertas antiguas, comprueba que el servidor tenga los commits recientes de `Reports/subida_share.py` y `Reports/get-reports-test.py`. La misma alerta usa `monitoring.telegram` en `/opt/gvm/Config/config.json` y el túnel SOCKS opcional de `/opt/gvm/Monitor/config.json`.
 
 ### Sistema de Cooldown
 

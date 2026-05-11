@@ -1,5 +1,29 @@
 # Changelog
 
+## [2.5.10] - 2026-05-11
+
+### Cambiado
+- **`exclusion.csv` y SharePoint (defensa en profundidad)** - `Reports/subida_share.py` y `Reports/get-reports-test.py`
+  - `subida_share.py`: si el archivo pedido es `exclusion.csv` (nombre, sin distinguir mayúsculas) y **no existe** o **está vacío**, termina con **código 0** y `[INFO]` en consola (no hay `[ERROR]` ni fallo para cron/monitores que miren el exit code).
+  - `get-reports-test.py`: **nunca** envía Telegram cuando la fase o el nombre de archivo es `exclusion.csv`, aunque falle Graph/API o quedara `notify_on_failure=True`; solo `[WARNING]` en consola. Los **reportes principales CSV/XLSX** siguen con alerta Telegram si fallan.
+  - Sigue existiendo comprobación antes de lanzar `subida_share.py` cuando el CSV no está o está vacío (menos llamadas innecesarias).
+
+### Operaciones
+- Los servidores solo reciben el arreglo si el commit está en el remoto (**`git push`** desde el desarrollo) y en el host se ejecuta **`git pull`** en `/opt/gvm` (o se reconstruye la imagen si los scripts van en Docker).
+
+### Documentación
+- `Monitor/README.md`, `Reports/README.md`: alineados con el comportamiento anterior.
+
+## [2.5.9] - 2026-05-08
+
+### Cambiado
+- **`exclusion.csv` y SharePoint** - `Reports/get-reports-test.py`
+  - No se intenta subir a SharePoint si `exclusion.csv` no existe o está vacío (caso habitual sin exclusiones)
+  - Si la subida de `exclusion.csv` falla, solo se registra `[WARNING]` en consola; **no** se envía alerta Telegram (los reportes CSV/XLSX siguen alertando igual). *Ampliado en 2.5.10 con `subida_share.py` y bloqueo explícito de Telegram.*
+
+### Documentación
+- `Monitor/README.md`: aclarado el alcance de las alertas SharePoint/Telegram
+
 ## [2.5.8] - 2026-05-08
 
 ### Mejorado
@@ -16,7 +40,7 @@
 - **Alertas Telegram para fallos de SharePoint** - `Reports/get-reports-test.py` ahora avisa si falla una subida
   - Detecta fallos de `subida_share.py` comprobando el `returncode`
   - Envía Telegram con país, site, región, scope, fase, archivo, destino, `stdout` y `stderr`
-  - Cubre subida de reportes CSV/XLSX y `exclusion.csv`
+  - Cubre la subida de los **reportes principales CSV/XLSX**; **`exclusion.csv` quedó fuera de Telegram** en versiones posteriores (2.5.9+), al ser opcional en muchas instalaciones
   - Reutiliza `monitoring.telegram` de `/opt/gvm/Config/config.json`
   - Soporta el túnel SOCKS opcional de `/opt/gvm/Monitor/config.json`
 

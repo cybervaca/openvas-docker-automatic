@@ -68,7 +68,7 @@ Script de pruebas con funcionalidades extendidas.
 **Características:**
 - Extracción de IPs excluidas de los targets
 - Registro de exclusiones en CSV
-- Subida automática a SharePoint
+- Subida automática a SharePoint (reportes CSV/XLSX; **`exclusion.csv` es opcional** y no genera alerta Telegram si falta, está vacío o falla la subida)
 - Generación de reportes con información completa de SO
 - Envío de notificaciones por correo
 - Limpieza automática de archivos temporales
@@ -95,6 +95,8 @@ python3 upload-reports.py archivo1.csv archivo2.csv
 
 #### `subida_share.py`
 Script para subir reportes a SharePoint.
+
+Para el fichero **`exclusion.csv`** (solo por nombre del archivo): si **no existe** o **tiene tamaño 0**, el script termina con **código de salida 0** y un mensaje `[INFO]` (comportamiento esperado cuando no hay exclusiones registradas). El resto de archivos siguen fallando con código 1 si no están en disco.
 
 **Uso:**
 ```bash
