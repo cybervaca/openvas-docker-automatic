@@ -179,8 +179,20 @@ def format_sharepoint_failure_message(configuracion, file_path, pais, automatiza
         f"<b>STDOUT:</b>\n<code>{stdout or 'N/A'}</code>"
     )
 
-def upload_sharepoint_or_alert(file_path, pais, automatizacion, fase, configuracion):
-    """Sube a SharePoint y envía Telegram si falla."""
+def upload_sharepoint_or_alert(file_path, pais, automatizacion, fase, configuracion, notify_on_failure=True):
+    """Sube a SharePoint y envía Telegram si falla (solo si notify_on_failure=True)."""
+    is_exclusion = fase == "exclusion.csv" or os.path.basename(file_path) == "exclusion.csv"
+    if is_exclusion:
+        if not os.path.isfile(file_path):
+            print(
+                "[INFO] exclusion.csv no existe (sin exclusiones registradas); "
+                "se omite subida a SharePoint."
+            )
+            return True
+        if os.path.getsize(file_path) == 0:
+            print("[INFO] exclusion.csv está vacío; se omite subida a SharePoint.")
+            return True
+
     result = subprocess.run([
         "python3", SHAREPOINT_UPLOAD_SCRIPT,
         "-f", file_path,
@@ -193,16 +205,20 @@ def upload_sharepoint_or_alert(file_path, pais, automatizacion, fase, configurac
             print(result.stdout)
         return True
 
-    print(f"[ERROR] Fallo subida SharePoint ({fase}): {result.stderr}")
-    mensaje = format_sharepoint_failure_message(
-        configuracion,
-        file_path,
-        pais,
-        automatizacion,
-        fase,
-        result
-    )
-    enviar_telegram_alerta_sharepoint(configuracion, mensaje)
+    # exclusion.csv: nunca Telegram (falta de fichero o fallo Graph); ver subida_share.py y CHANGELOG.
+    alert_telegram = notify_on_failure and not is_exclusion
+    level = "[ERROR]" if alert_telegram else "[WARNING]"
+    print(f"{level} Fallo subida SharePoint ({fase}): {result.stderr}")
+    if alert_telegram:
+        mensaje = format_sharepoint_failure_message(
+            configuracion,
+            file_path,
+            pais,
+            automatizacion,
+            fase,
+            result
+        )
+        enviar_telegram_alerta_sharepoint(configuracion, mensaje)
     return False
 
 # Función para enviar correo electrónico
@@ -675,7 +691,14 @@ def get_tasks_and_exclusions(connection, user, password, pais):
                 writer.writerows(new_records)
                 
         configuracion = leer_configuracion()
-        upload_sharepoint_or_alert(CSV_FILE, pais, 'Openvas_Interno', 'exclusion.csv', configuracion)
+        upload_sharepoint_or_alert(
+            CSV_FILE,
+            pais,
+            'Openvas_Interno',
+            'exclusion.csv',
+            configuracion,
+            notify_on_failure=False,
+        )
 
 if __name__ == "__main__":
     dir_csv = '/opt/gvm/Reports/exports/'

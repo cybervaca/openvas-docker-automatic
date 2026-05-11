@@ -110,10 +110,21 @@ def main():
     #parser.add_argument("--overwrite", action="store_true", help="Sobrescribir archivo si existe")
 
     args = parser.parse_args()
-    lp = Path(args.file)
+    lp = Path(args.file).expanduser()
     if not lp.is_file():
+        # Muchos OpenVAS nunca generan exclusion.csv; no es un fallo operativo.
+        if lp.name.lower() == "exclusion.csv":
+            print(
+                f"[INFO] Sin exclusion.csv en {lp}; se omite subida "
+                "(normal si no hay exclusiones)."
+            )
+            sys.exit(0)
         print(f"[ERROR] Archivo no encontrado: {lp}", file=sys.stderr)
         sys.exit(1)
+
+    if lp.name.lower() == "exclusion.csv" and lp.stat().st_size == 0:
+        print("[INFO] exclusion.csv vacío; se omite subida a SharePoint.")
+        sys.exit(0)
 
     # Construir ruta de destino en SharePoint
     remote_path = f"General/Subidas/{args.pais}/{args.automatizacion}/{SITE}"
