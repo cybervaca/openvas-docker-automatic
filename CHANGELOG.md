@@ -1,5 +1,16 @@
 # Changelog
 
+## [2.5.11] - 2026-05-18
+
+### Añadido
+- **Modo mensual (SharePoint)** — `Targets_Tasks/run-task.py`, `Reports/subida_share.py`, `Cron/run_task.sh`
+  - Flag opcional **`--mensual`** en `run-task.py`: ejecuta `subida_share.py --check-mensual` y, si ya hay **informe CSV/XLSX del mes calendario** en `General/Subidas/{pais}/Openvas_Interno/{site}` (misma convención que la subida), **no** arranca tareas nuevas ni llama a `get-reports-test.py` (**código de salida 4**).
+  - **`subida_share.py --check-mensual`**: listado por Microsoft Graph con paginación; salida **0** = hay informe del mes, **1** = no hay, **2** = error (en `run-task` se registra advertencia y se **continúa** el flujo, fail-open).
+  - **`run_task.sh`** reenvía argumentos al Python (`"$@"`), p. ej. `./run_task.sh --mensual`.
+
+### Documentación
+- `README.md`: uso de `--mensual` y cron.
+
 ## [2.5.10] - 2026-05-11
 
 ### Cambiado

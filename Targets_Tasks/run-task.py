@@ -11,6 +11,7 @@ import getpass
 import datetime
 import smtplib
 import os, json
+import argparse
 import subprocess
 import time
 from email.mime.text import MIMEText
@@ -19,6 +20,7 @@ from email.mime.base import MIMEBase
 from email import encoders
 
 GVM_CONNECTION_TIMEOUT = 900  # Listar muchas tareas/reportes puede tardar más de 60s.
+SHAREPOINT_UPLOAD_SCRIPT = "/opt/gvm/Reports/subida_share.py"
 
 def leer_configuracion():
     try:
@@ -197,7 +199,7 @@ def ejecutar_operacion_gmp(operacion_func, user, password, max_intentos=3, delay
     raise ultimo_error
 
 
-def start_task(connection, user, password, configuracion):
+def start_task(connection, user, password, configuracion, mensual=False):
     informacion_tareas = []
     logfinal='/opt/gvm/tasksend.txt'
     tasklog='/opt/gvm/taskslog.txt'
@@ -209,6 +211,37 @@ def start_task(connection, user, password, configuracion):
         print(f"⚠ MANTENIMIENTO EN CURSO: {mensaje}")
         print("No se ejecutarán tareas nuevas hasta que el mantenimiento finalice.")
         return 3  # Nuevo código de retorno para mantenimiento activo
+
+    if mensual:
+        proc = subprocess.run(
+            ["python3", SHAREPOINT_UPLOAD_SCRIPT, "--check-mensual"],
+            capture_output=True,
+            text=True,
+        )
+        if proc.stdout:
+            for line in proc.stdout.splitlines():
+                print(line)
+        if proc.returncode == 0:
+            write_log(
+                "MODO MENSUAL: Ya existe informe en SharePoint este mes. No se ejecutan tareas nuevas.",
+                tasklog,
+            )
+            print("⚠ MODO MENSUAL: informe del mes ya presente en SharePoint; no se lanzan tareas nuevas.")
+            return 4
+        if proc.returncode == 2:
+            err = (proc.stderr or "").strip() or "Error desconocido al consultar SharePoint"
+            write_log(
+                f"ADVERTENCIA MODO MENSUAL: falló la comprobación SharePoint; se continúa (fail-open). {err}",
+                tasklog,
+            )
+            print(f"⚠ MODO MENSUAL: no se pudo verificar SharePoint; se continúa el flujo.\n{err}")
+        elif proc.returncode != 1:
+            err = (proc.stderr or "").strip() or f"código de salida {proc.returncode}"
+            write_log(
+                f"ADVERTENCIA MODO MENSUAL: respuesta inesperada de subida_share.py; se continúa. {err}",
+                tasklog,
+            )
+            print(f"⚠ MODO MENSUAL: comprobación SharePoint devolvió {proc.returncode}; se continúa.\n{err}")
     
     try:
         # Verificar tareas en ejecución
@@ -300,17 +333,28 @@ def start_task(connection, user, password, configuracion):
         print(f"❌ Error inesperado: {e}")
         raise
 
-configuracion = leer_configuracion()
-user = configuracion.get('user')
-password = configuracion.get('password')
-connection = connect_gvm()
-resultado=start_task(connection,user,password,configuracion)
-if(resultado==0):
-    print("Finalizamos sin lanzar")
-elif(resultado==1):
-    print("Ya hay una corriendo")
-elif(resultado==2):
-    print("Arrancamos una nueva")
-elif(resultado==3):
-    print("Mantenimiento en curso: no se pueden ejecutar tareas nuevas")
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Orquestación de tareas OpenVAS / GVM")
+    parser.add_argument(
+        "--mensual",
+        action="store_true",
+        help="Si ya hay informe CSV/XLSX del mes en SharePoint, no iniciar tareas nuevas ni get-reports-test",
+    )
+    args = parser.parse_args()
+
+    configuracion = leer_configuracion()
+    user = configuracion.get('user')
+    password = configuracion.get('password')
+    connection = connect_gvm()
+    resultado = start_task(connection, user, password, configuracion, mensual=args.mensual)
+    if resultado == 0:
+        print("Finalizamos sin lanzar")
+    elif resultado == 1:
+        print("Ya hay una corriendo")
+    elif resultado == 2:
+        print("Arrancamos una nueva")
+    elif resultado == 3:
+        print("Mantenimiento en curso: no se pueden ejecutar tareas nuevas")
+    elif resultado == 4:
+        print("Modo mensual: ya existe informe en SharePoint este mes; no se ejecutan tareas nuevas")
 
