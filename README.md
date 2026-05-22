@@ -50,6 +50,10 @@ El script [`Cron/run_task.sh`](Cron/run_task.sh) activa el venv y ejecuta [`Targ
 - **Modo normal:** `./run_task.sh` — mismo comportamiento que antes.
 - **Modo mensual (`--mensual`):** `./run_task.sh --mensual` — antes de tocar GVM se llama a `Reports/subida_share.py --check-mensual`. Si en SharePoint ya existe un informe **.csv** o **.xlsx** del **mes actual** (prefijo `YYYY_MM_` en el nombre o fecha de modificación en Graph, según implementación), **no** se inician tareas nuevas ni se ejecuta la generación de reportes (`get-reports-test.py`); el proceso termina con código **4**. Si la comprobación falla (red, credenciales, etc., código **2**), se deja constancia en el log y **se sigue** el flujo habitual (fail-open).
 
+Las carpetas hasta el informe (`General/Subidas/.../Openvas_Interno/…`) se resuelven contra Microsoft Graph **sin distinguir mayúsculas** (`Mexico` y `MEXICO` encuentran la misma carpeta). Las subidas con `subida_share.py -f … -p … -a …` usan la misma lógica.
+
+**Dependencias SharePoint (`requests`, `msal`):** tienen que estar instaladas en el **mismo** entorno desde el que se ejecuta `./run_task.sh` (`source /opt/gvm/gvm`). Si falta alguna, `./run_task.sh --mensual` verá código **2** y continuará la orquestación (fail-open).
+
 Requisitos: la misma configuración Graph/SharePoint que para las subidas (`/opt/gvm/Config/config.json`: `pais`, `site`, `tenant_id`, `client_id`, `client_secret`).
 
 ## Monitoreo

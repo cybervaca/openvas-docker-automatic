@@ -1,5 +1,18 @@
 # Changelog
 
+## [2.5.12] - 2026-05-22
+
+### Cambiado
+- **`Reports/subida_share.py`**: comprobación mensual (`--check-mensual`) y **subidas** resuelven la ruta bajo **`Documents`** nivel a nivel, comparando nombres de carpeta **sin distinguir mayúsculas**, alineado con SharePoint Online. La biblioteca **`Documents`** se localiza igual sin caso. Las subidas usan PUT por **`id`** de carpeta padre tras resolver la jerarquía.
+### Mejorado
+- Si falta **`requests`** o **`msal`**, `subida_share.py` imprime mensaje instructivo con **salida `2`** (fail-open desde `run-task --mensual`), no sólo traceback con código inconsistente.
+
+### Ops
+- **`Targets_Tasks/run-task.py`**: el chequeo mensual ejecuta **`subida_share`** con **`sys.executable`** (mismo Python/venv que el padre cuando se usa `./run_task.sh`).
+
+### Documentación
+- `README.md`: nota sobre rutas SharePoint insensitive y dependencias pip.
+
 ## [2.5.11] - 2026-05-18
 
 ### Añadido

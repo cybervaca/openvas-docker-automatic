@@ -96,7 +96,7 @@ python3 upload-reports.py archivo1.csv archivo2.csv
 #### `subida_share.py`
 Script para subir reportes a SharePoint.
 
-Para el fichero **`exclusion.csv`** (solo por nombre del archivo): si **no existe** o **tiene tamaño 0**, el script termina con **código de salida 0** y un mensaje `[INFO]` (comportamiento esperado cuando no hay exclusiones registradas). El resto de archivos siguen fallando con código 1 si no están en disco.
+La ruta **`General/Subidas/{-p}/{-a}/{site}`** se resuelve en Graph **nivel a nivel** sin distinguir mayúsculas en **nombres de carpeta**. Requiere `requests` y `msal` (ver `requirements.txt` del raíz).
 
 **Uso:**
 ```bash

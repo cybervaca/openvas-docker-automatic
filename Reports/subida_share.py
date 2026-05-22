@@ -7,8 +7,16 @@ import datetime
 from pathlib import Path
 from urllib.parse import quote
 
-import requests
-import msal
+try:
+    import requests
+    import msal
+except ImportError as e:
+    sys.stderr.write(
+        "[ERROR] Instale requests y msal en el mismo entorno Python que ejecute este "
+        f"script (p. ej. pip install -r requirements.txt). Detalle: {e}\n"
+    )
+    sys.exit(2)
+
 
 def lee_config(dato):
     try:
@@ -66,7 +74,7 @@ def get_site_id(token):
     return resp.json()["id"]
 
 def get_drive_id(token, site_id):
-    """Obtiene el drive-id de la biblioteca Documents"""
+    """Obtiene el drive-id de la biblioteca Documents (nombre sin distinguir mayúsculas)."""
     url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/drives"
     resp = requests.get(url, headers={"Authorization": f"Bearer {token}"})
     if resp.status_code != 200:
@@ -75,21 +83,85 @@ def get_drive_id(token, site_id):
 
     drives = resp.json().get("value", [])
     for d in drives:
-        if d.get("name") in ["Documents"]:
+        if (d.get("name") or "").lower() == "documents":
             return d["id"]
 
     print("[ERROR] No se encontró la biblioteca 'Documents'", file=sys.stderr)
     sys.exit(1)
- 
 
-def upload_file(token, site_id, drive_id, local_path, remote_path, overwrite=False):
-    """Sube archivo a SharePoint usando Graph API"""
+
+def list_all_drive_children(site_id, drive_id, headers, parent_item_id=None):
+    """Lista hijos directos del root o del item carpeta (paginación completa)."""
+    items = []
+    if parent_item_id is None:
+        next_link = (
+            f"https://graph.microsoft.com/v1.0/sites/{site_id}/drives/{drive_id}/root/children"
+        )
+    else:
+        next_link = (
+            f"https://graph.microsoft.com/v1.0/sites/{site_id}/drives/{drive_id}/items/"
+            f"{parent_item_id}/children"
+        )
+    while next_link:
+        r = requests.get(next_link, headers=headers, timeout=120)
+        if r.status_code != 200:
+            return None, f"HTTP {r.status_code} {r.text}"
+        payload = r.json()
+        items.extend(payload.get("value", []))
+        next_link = payload.get("@odata.nextLink")
+    return items, None
+
+
+def resolve_nested_drive_folder_insensitive(site_id, drive_id, headers, segments_wanted):
+    """
+    Bajo Documents; en cada nivel elige carpeta cuyo name coincide sin distinguir mayúsculas.
+    Devuelve (folder_item_id, ruta_mostrar, texto_error_o_None).
+    """
+    trimmed = [s.strip() for s in segments_wanted if s and str(s).strip()]
+    if not trimmed:
+        return None, None, "lista de segmentos vacía"
+
+    parent_id = None
+    resolved_chunks = []
+
+    for want in trimmed:
+        want_norm = want.lower()
+        kids, err = list_all_drive_children(site_id, drive_id, headers, parent_id)
+        if err:
+            ctx = "/".join(resolved_chunks) if resolved_chunks else "/"
+            return None, None, f"Graph al listar (tras «{ctx}»): {err}"
+        found = None
+        for item in kids:
+            if item.get("folder") is None:
+                continue
+            if (item.get("name") or "").lower() == want_norm:
+                found = item
+                break
+        if found is None:
+            return (
+                None,
+                None,
+                f"no existe subcarpeta «{want}» tras "
+                f"{'/' + '/'.join(resolved_chunks) if resolved_chunks else '/'} "
+                "(comparación sin mayúsculas).",
+            )
+        resolved_chunks.append(found["name"])
+        parent_id = found["id"]
+
+    return parent_id, "/".join(resolved_chunks), None
+
+
+def upload_file_to_drive_folder(token, site_id, drive_id, parent_folder_item_id, local_path, overwrite=False):
+    """Sube usando el id del padre en Graph."""
     file_name = Path(local_path).name
+    encoded = quote(file_name, safe="")
     with open(local_path, "rb") as f:
         data = f.read()
 
-    url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/drives/{drive_id}/root:/{remote_path}/{file_name}:/content"
-
+    url = (
+        f"https://graph.microsoft.com/v1.0/sites/{site_id}/drives/{drive_id}/items/"
+        f"{parent_folder_item_id}:/{encoded}:/content"
+    )
     if not overwrite:
         url += "?@microsoft.graph.conflictBehavior=fail"
     else:
@@ -110,8 +182,9 @@ def run_check_mensual():
     Lista la carpeta de informes en SharePoint y detecta CSV/XLSX del mes calendario actual.
 
     Salida: 0 = ya hay informe este mes; 1 = no hay; 2 = error Graph/config (run-task hace fail-open).
-    Criterio: nombre con prefijo YYYY_MM_ (como generan los scripts) o lastModifiedDateTime
-    en el mes actual (excluye exclusion.csv en la rama por fecha).
+    Rutas bajo Documents: cada segmento se resuelve contra Graph sin distinguir mayúsculas.
+    Criterio: nombre con prefijo YYYY_MM_ (hora local del servidor) o lastModifiedDateTime
+    en el mes actual UTC (excluye exclusion.csv en la rama por fecha).
     """
     def _config_invalid(val):
         return val is None or str(val).startswith("ERROR") or str(val) == "SITE_NO_DEFINIDO"
@@ -123,13 +196,14 @@ def run_check_mensual():
         print("[ERROR] site no definido en config.json", file=sys.stderr)
         return 2
 
-    pais = lee_config("pais")
+    pais = lee_config("pais").strip()
     if _config_invalid(pais):
         print("[ERROR] pais no definido en config.json", file=sys.stderr)
         return 2
 
     automatizacion = "Openvas_Interno"
-    remote_folder = f"General/Subidas/{pais}/{automatizacion}/{SITE}"
+    path_hints = ["General", "Subidas", pais, automatizacion, str(SITE).strip()]
+    hints_txt = "/".join(path_hints)
 
     try:
         app = msal.ConfidentialClientApplication(
@@ -154,25 +228,17 @@ def run_check_mensual():
             return 2
         site_id = r_site.json()["id"]
 
-        url_drives = f"https://graph.microsoft.com/v1.0/sites/{site_id}/drives"
-        r_drives = requests.get(url_drives, headers={"Authorization": f"Bearer {token}"}, timeout=60)
-        if r_drives.status_code != 200:
-            print(f"[ERROR] drives: {r_drives.status_code} {r_drives.text}", file=sys.stderr)
-            return 2
-        drive_id = None
-        for d in r_drives.json().get("value", []):
-            if d.get("name") == "Documents":
-                drive_id = d["id"]
-                break
-        if not drive_id:
-            print("[ERROR] No se encontró la biblioteca 'Documents'", file=sys.stderr)
+        headers = {"Authorization": f"Bearer {token}"}
+        drive_id = get_drive_id(token, site_id)
+        folder_id, resolved_under_docs, ferr = resolve_nested_drive_folder_insensitive(
+            site_id, drive_id, headers, path_hints
+        )
+        if ferr or not folder_id:
+            print(f"[ERROR] Resolver carpeta SharePoint: {ferr}", file=sys.stderr)
             return 2
 
-        enc_path = "/".join(quote(part, safe="") for part in remote_folder.split("/") if part)
-        list_url = (
-            f"https://graph.microsoft.com/v1.0/sites/{site_id}/drives/{drive_id}/root:"
-            f"/{enc_path}:/children"
-        )
+        print(f"[INFO] Comprobación mensual → hint ruta (sin case): {hints_txt}")
+        print(f"[INFO] Carpeta resuelta Graph: {resolved_under_docs}")
 
         now = datetime.datetime.now()
         year, month = now.year, now.month
@@ -183,40 +249,32 @@ def run_check_mensual():
         else:
             month_end = datetime.datetime(year, month + 1, 1, tzinfo=datetime.timezone.utc)
 
-        headers = {"Authorization": f"Bearer {token}"}
-        next_link = list_url
+        children, list_err = list_all_drive_children(site_id, drive_id, headers, folder_id)
+        if list_err:
+            print(f"[ERROR] Listar carpeta SharePoint: {list_err}", file=sys.stderr)
+            return 2
 
-        while next_link:
-            r_list = requests.get(next_link, headers=headers, timeout=120)
-            if r_list.status_code != 200:
-                print(
-                    f"[ERROR] Listar carpeta SharePoint: {r_list.status_code} {r_list.text}",
-                    file=sys.stderr,
-                )
-                return 2
-            payload = r_list.json()
-            for item in payload.get("value", []):
-                if item.get("folder") is not None:
-                    continue
-                name = item.get("name") or ""
-                lower = name.lower()
-                if not (lower.endswith(".csv") or lower.endswith(".xlsx")):
-                    continue
-                if name.startswith(prefix):
-                    print(f"[INFO] Informe del mes en SharePoint (nombre): {name}")
-                    return 0
-                lm = item.get("lastModifiedDateTime")
-                if lower == "exclusion.csv":
-                    continue
-                if lm:
-                    try:
-                        parsed = datetime.datetime.fromisoformat(lm.replace("Z", "+00:00"))
-                        if month_start <= parsed < month_end:
-                            print(f"[INFO] Informe del mes en SharePoint (lastModified): {name}")
-                            return 0
-                    except (ValueError, TypeError):
-                        pass
-            next_link = payload.get("@odata.nextLink")
+        for item in children:
+            if item.get("folder") is not None:
+                continue
+            name = item.get("name") or ""
+            lower = name.lower()
+            if not (lower.endswith(".csv") or lower.endswith(".xlsx")):
+                continue
+            if name.startswith(prefix):
+                print(f"[INFO] Informe del mes en SharePoint (nombre): {name}")
+                return 0
+            lm = item.get("lastModifiedDateTime")
+            if lower == "exclusion.csv":
+                continue
+            if lm:
+                try:
+                    parsed = datetime.datetime.fromisoformat(lm.replace("Z", "+00:00"))
+                    if month_start <= parsed < month_end:
+                        print(f"[INFO] Informe del mes en SharePoint (lastModified): {name}")
+                        return 0
+                except (ValueError, TypeError):
+                    pass
 
         print("[INFO] No hay informe CSV/XLSX del mes actual en la ruta de SharePoint.")
         return 1
@@ -266,16 +324,22 @@ def main():
         print("[INFO] exclusion.csv vacío; se omite subida a SharePoint.")
         sys.exit(0)
 
-    # Construir ruta de destino en SharePoint
-    remote_path = f"General/Subidas/{args.pais}/{args.automatizacion}/{SITE}"
+    hints = ["General", "Subidas", str(args.pais).strip(), str(args.automatizacion).strip(), str(SITE).strip()]
+    print(f"[INFO] Subida SharePoint: ruta solicitada sin case en carpetas → {'/'.join(hints)}")
 
-    # Obtener token y site/drive ids
     token = get_token()
     site_id = get_site_id(token)
     drive_id = get_drive_id(token, site_id)
+    headers = {"Authorization": f"Bearer {token}"}
+    fid, resolved, ferr = resolve_nested_drive_folder_insensitive(
+        site_id, drive_id, headers, hints
+    )
+    if ferr or not fid:
+        print(f"[ERROR] No resuelvo carpeta de subida: {ferr}", file=sys.stderr)
+        sys.exit(1)
+    print(f"[INFO] Carpeta destino resuelta: {resolved}")
 
-    #print(f"[INFO] Subiendo {lp} a {remote_path} (site={site_id}, drive={drive_id})")
-    upload_file(token, site_id, drive_id, str(lp), remote_path, overwrite=True)
+    upload_file_to_drive_folder(token, site_id, drive_id, fid, str(lp), overwrite=True)
 
 if __name__ == "__main__":
     main()

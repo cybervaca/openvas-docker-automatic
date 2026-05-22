@@ -11,6 +11,7 @@ import getpass
 import datetime
 import smtplib
 import os, json
+import sys
 import argparse
 import subprocess
 import time
@@ -214,7 +215,7 @@ def start_task(connection, user, password, configuracion, mensual=False):
 
     if mensual:
         proc = subprocess.run(
-            ["python3", SHAREPOINT_UPLOAD_SCRIPT, "--check-mensual"],
+            [sys.executable, SHAREPOINT_UPLOAD_SCRIPT, "--check-mensual"],
             capture_output=True,
             text=True,
         )
