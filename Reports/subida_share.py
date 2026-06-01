@@ -112,9 +112,40 @@ def list_all_drive_children(site_id, drive_id, headers, parent_item_id=None):
     return items, None
 
 
-def resolve_nested_drive_folder_insensitive(site_id, drive_id, headers, segments_wanted):
+def create_drive_folder(site_id, drive_id, headers, parent_item_id, folder_name):
+    """
+    Crea una carpeta bajo el padre indicado (o bajo root si parent_item_id es None).
+    Devuelve (item_dict, texto_error_o_None).
+    """
+    body = {
+        "name": folder_name,
+        "folder": {},
+        "@microsoft.graph.conflictBehavior": "fail",
+    }
+    if parent_item_id is None:
+        url = (
+            f"https://graph.microsoft.com/v1.0/sites/{site_id}/drives/{drive_id}/root/children"
+        )
+    else:
+        url = (
+            f"https://graph.microsoft.com/v1.0/sites/{site_id}/drives/{drive_id}/items/"
+            f"{parent_item_id}/children"
+        )
+    r = requests.post(url, headers={**headers, "Content-Type": "application/json"}, json=body, timeout=120)
+    if r.status_code not in (200, 201):
+        return None, f"HTTP {r.status_code} {r.text}"
+    item = r.json()
+    if item.get("folder") is None:
+        return None, f"«{folder_name}» ya existe como archivo, no como carpeta"
+    return item, None
+
+
+def resolve_nested_drive_folder_insensitive(
+    site_id, drive_id, headers, segments_wanted, create_missing=False
+):
     """
     Bajo Documents; en cada nivel elige carpeta cuyo name coincide sin distinguir mayúsculas.
+    Si create_missing=True, crea la subcarpeta faltante vía Graph y continúa.
     Devuelve (folder_item_id, ruta_mostrar, texto_error_o_None).
     """
     trimmed = [s.strip() for s in segments_wanted if s and str(s).strip()]
@@ -138,12 +169,24 @@ def resolve_nested_drive_folder_insensitive(site_id, drive_id, headers, segments
                 found = item
                 break
         if found is None:
-            return (
-                None,
-                None,
-                f"no existe subcarpeta «{want}» tras "
-                f"{'/' + '/'.join(resolved_chunks) if resolved_chunks else '/'} "
-                "(comparación sin mayúsculas).",
+            if not create_missing:
+                return (
+                    None,
+                    None,
+                    f"no existe subcarpeta «{want}» tras "
+                    f"{'/' + '/'.join(resolved_chunks) if resolved_chunks else '/'} "
+                    "(comparación sin mayúsculas).",
+                )
+            created, cerr = create_drive_folder(
+                site_id, drive_id, headers, parent_id, want
+            )
+            if cerr:
+                ctx = "/".join(resolved_chunks) if resolved_chunks else "/"
+                return None, None, f"no se pudo crear «{want}» tras «{ctx}»: {cerr}"
+            found = created
+            print(
+                "[INFO] Carpeta SharePoint creada: "
+                + "/".join(resolved_chunks + [found["name"]])
             )
         resolved_chunks.append(found["name"])
         parent_id = found["id"]
@@ -332,7 +375,7 @@ def main():
     drive_id = get_drive_id(token, site_id)
     headers = {"Authorization": f"Bearer {token}"}
     fid, resolved, ferr = resolve_nested_drive_folder_insensitive(
-        site_id, drive_id, headers, hints
+        site_id, drive_id, headers, hints, create_missing=True
     )
     if ferr or not fid:
         print(f"[ERROR] No resuelvo carpeta de subida: {ferr}", file=sys.stderr)

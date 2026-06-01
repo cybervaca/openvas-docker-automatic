@@ -109,7 +109,7 @@ Este script se ejecuta automáticamente en:
 
 **a) `get-reports-test.py` (después de subir reportes):**
 - Exporta targets actuales
-- Sube automáticamente a SharePoint
+- Sube automáticamente a SharePoint (`General/Subidas/{pais}/Targets_Export/{site}`; `subida_share.py` crea subcarpetas faltantes)
 - Se ejecuta cada vez que se generan reportes
 
 **b) `update-script.py` (al actualizar repo):**

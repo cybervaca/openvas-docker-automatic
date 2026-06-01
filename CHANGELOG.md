@@ -1,5 +1,16 @@
 # Changelog
 
+## [2.5.13] - 2026-06-01
+
+### Añadido
+- **`Reports/subida_share.py`**: en subidas (`-f`, `-p`, `-a`) se **crean automáticamente** las subcarpetas faltantes bajo `Documents` vía Microsoft Graph (p. ej. `General/Subidas/{pais}/Targets_Export/{site}` para `export-target.py`). Log `[INFO] Carpeta SharePoint creada: …` por cada nivel nuevo.
+
+### Sin cambio de comportamiento
+- **`--check-mensual`**: sigue solo resolviendo rutas existentes; no crea carpetas al comprobar informes del mes.
+
+### Documentación
+- `README.md`: nota sobre creación automática de carpetas en subidas SharePoint.
+
 ## [2.5.12] - 2026-05-22
 
 ### Cambiado
