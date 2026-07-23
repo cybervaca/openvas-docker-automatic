@@ -5,19 +5,22 @@ Conexión GMP a gvmd con compatibilidad dual:
 - tls  → TLSConnection a host:port (por defecto 127.0.0.1:9390)
 - unix → UnixSocketConnection al socket de gvmd
 - auto → prueba TLS primero (no romper hosts que ya usan 9390);
-         si falla, prueba sockets Unix habituales
+         si falla, prueba sockets Unix habituales y el socket
+         dentro del contenedor Docker vía /proc/<pid>/root/...
 
 Claves opcionales en /opt/gvm/Config/config.json:
   "gvm_connection": "auto" | "tls" | "unix"
   "gvm_host": "127.0.0.1"
   "gvm_port": 9390
   "gvm_socket": "/opt/gvm/run/gvmd/gvmd.sock"
+  "gvm_docker_container": "openvas"
 """
 from __future__ import annotations
 
 import json
 import os
 import socket
+import subprocess
 from typing import Any, Dict, List, Optional, Tuple
 
 from gvm.connections import TLSConnection, UnixSocketConnection
@@ -27,12 +30,19 @@ DEFAULT_CONFIG_PATH = "/opt/gvm/Config/config.json"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 9390
 DEFAULT_TIMEOUT = 900
+DEFAULT_DOCKER_CONTAINER = "openvas"
 
 DEFAULT_SOCKET_CANDIDATES = (
     "/opt/gvm/run/gvmd/gvmd.sock",
     "/run/gvmd/gvmd.sock",
     "/var/run/gvmd/gvmd.sock",
     "/usr/local/var/run/gvmd.sock",
+)
+
+MOUNT_HINT = (
+    "En docker-compose del contenedor openvas añade el volumen "
+    "'/opt/gvm/run/gvmd:/run/gvmd' y recrea el contenedor "
+    "(docker compose up -d). Así el socket queda en el host."
 )
 
 # Cache de transporte que funcionó en este proceso (evita re-probar en cada reconnect)
@@ -64,6 +74,68 @@ def _port(cfg: dict) -> int:
         return DEFAULT_PORT
 
 
+def _docker_container_name(cfg: dict) -> str:
+    return (
+        str(cfg.get("gvm_docker_container") or DEFAULT_DOCKER_CONTAINER).strip()
+        or DEFAULT_DOCKER_CONTAINER
+    )
+
+
+def _docker_gvmd_socket_paths(container_name: str) -> List[str]:
+    """
+    Descubre el socket gvmd sin volumen montado:
+    1) bind mount host path si /run/gvmd ya está montado
+    2) /proc/<pid>/root/run/gvmd/gvmd.sock (suele requerir root o caps)
+    """
+    paths: List[str] = []
+    try:
+        r = subprocess.run(
+            [
+                "docker",
+                "inspect",
+                "-f",
+                "{{range .Mounts}}{{.Destination}} {{.Source}}{{println}}{{end}}",
+                container_name,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=8,
+        )
+        if r.returncode == 0:
+            for line in r.stdout.splitlines():
+                parts = line.strip().split(None, 1)
+                if len(parts) != 2:
+                    continue
+                dest, source = parts[0], parts[1]
+                if dest.rstrip("/") in ("/run/gvmd", "/var/run/gvmd") or dest.endswith(
+                    "/gvmd"
+                ):
+                    candidate = os.path.join(source, "gvmd.sock")
+                    if candidate not in paths:
+                        paths.append(candidate)
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+    try:
+        r = subprocess.run(
+            ["docker", "inspect", "-f", "{{.State.Pid}}", container_name],
+            capture_output=True,
+            text=True,
+            timeout=8,
+        )
+        if r.returncode == 0:
+            pid = (r.stdout or "").strip()
+            if pid.isdigit() and int(pid) > 0:
+                for rel in ("run/gvmd/gvmd.sock", "var/run/gvmd/gvmd.sock"):
+                    candidate = f"/proc/{pid}/root/{rel}"
+                    if candidate not in paths:
+                        paths.append(candidate)
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+    return paths
+
+
 def _socket_candidates(cfg: dict) -> List[str]:
     paths: List[str] = []
     custom = cfg.get("gvm_socket")
@@ -72,7 +144,19 @@ def _socket_candidates(cfg: dict) -> List[str]:
     for p in DEFAULT_SOCKET_CANDIDATES:
         if p not in paths:
             paths.append(p)
+    for p in _docker_gvmd_socket_paths(_docker_container_name(cfg)):
+        if p not in paths:
+            paths.append(p)
     return paths
+
+
+def _connection_hint(errors: List[str]) -> str:
+    return (
+        "; ".join(errors)
+        + " | "
+        + MOUNT_HINT
+        + " | Comprueba: docker exec openvas ls -la /run/gvmd/gvmd.sock"
+    )
 
 
 def tcp_port_open(host: str, port: int, timeout: float = 2.0) -> bool:
@@ -118,7 +202,30 @@ def _build_from_resolved(timeout: int):
     if _resolved["type"] == "tls":
         return make_tls_connection(_resolved["host"], _resolved["port"], timeout)
     if _resolved["type"] == "unix":
-        return make_unix_connection(_resolved["path"], timeout)
+        path = _resolved.get("path")
+        # /proc/<pid>/root/... deja de valer si el contenedor reinició
+        if not path or not os.path.exists(path):
+            return None
+        return make_unix_connection(path, timeout)
+    return None
+
+
+def _try_unix_paths(paths: List[str], ptimeout: int, timeout: int, verbose: bool, errors: List[str]):
+    global _resolved
+    for path in paths:
+        if not os.path.exists(path):
+            errors.append(f"unix:{path}: no existe")
+            continue
+        if not os.access(path, os.R_OK):
+            errors.append(f"unix:{path}: sin permiso (prueba root o monta el volumen)")
+            continue
+        ok, detail = probe_connection(make_unix_connection(path, ptimeout))
+        if ok:
+            _resolved = {"type": "unix", "path": path}
+            if verbose:
+                print(f"[INFO] GVM → Unix socket {path}")
+            return make_unix_connection(path, timeout)
+        errors.append(f"unix:{path}: {detail}")
     return None
 
 
@@ -133,8 +240,8 @@ def connect_gvm(
     """
     Devuelve un objeto de conexión listo para ``Gmp(connection=...)``.
 
-    En modo ``auto`` prueba TLS (9390) primero y luego sockets Unix.
-    El probe usa ``probe_timeout`` (corto); la conexión devuelta usa ``timeout``.
+    En modo ``auto`` prueba TLS (9390) primero y luego sockets Unix
+    (rutas fijas + descubrimiento Docker).
     """
     global _resolved
     cfg = load_gvm_config(config_path=config_path, config=config)
@@ -143,6 +250,7 @@ def connect_gvm(
     port = _port(cfg)
     errors: List[str] = []
     ptimeout = min(probe_timeout, timeout) if timeout else probe_timeout
+    candidates = _socket_candidates(cfg)
 
     if not force_probe and _resolved is not None:
         conn = _build_from_resolved(timeout)
@@ -150,6 +258,7 @@ def connect_gvm(
             if verbose:
                 print(f"[INFO] GVM reutiliza conexión: {describe_resolved()}")
             return conn
+        _resolved = None
 
     # --- tls only ---
     if mode == "tls":
@@ -163,23 +272,12 @@ def connect_gvm(
 
     # --- unix only ---
     if mode == "unix":
-        for path in _socket_candidates(cfg):
-            if not os.path.exists(path):
-                errors.append(f"unix:{path}: no existe")
-                continue
-            ok, detail = probe_connection(make_unix_connection(path, ptimeout))
-            if ok:
-                _resolved = {"type": "unix", "path": path}
-                if verbose:
-                    print(f"[INFO] GVM conectado por Unix socket: {path}")
-                return make_unix_connection(path, timeout)
-            errors.append(f"unix:{path}: {detail}")
-        raise ConnectionError(
-            "GVM Unix falló. Intentos: " + "; ".join(errors)
-        )
+        conn = _try_unix_paths(candidates, ptimeout, timeout, verbose, errors)
+        if conn is not None:
+            return conn
+        raise ConnectionError("GVM Unix falló. " + _connection_hint(errors))
 
     # --- auto: TLS primero (compat hosts 9390), luego Unix ---
-    # Si el puerto ni siquiera acepta TCP, no esperar el handshake TLS completo.
     if tcp_port_open(host, port, timeout=2.0):
         ok, detail = probe_connection(make_tls_connection(host, port, ptimeout))
         if ok:
@@ -195,20 +293,12 @@ def connect_gvm(
         if verbose:
             print(f"[INFO] Puerto {host}:{port} cerrado; probando Unix socket...")
 
-    for path in _socket_candidates(cfg):
-        if not os.path.exists(path):
-            errors.append(f"unix:{path}: no existe")
-            continue
-        ok, detail = probe_connection(make_unix_connection(path, ptimeout))
-        if ok:
-            _resolved = {"type": "unix", "path": path}
-            if verbose:
-                print(f"[INFO] GVM auto → Unix socket {path}")
-            return make_unix_connection(path, timeout)
-        errors.append(f"unix:{path}: {detail}")
+    conn = _try_unix_paths(candidates, ptimeout, timeout, verbose, errors)
+    if conn is not None:
+        return conn
 
     raise ConnectionError(
-        "No se pudo conectar a GVM (auto: TLS + Unix). Intentos: " + "; ".join(errors)
+        "No se pudo conectar a GVM (auto: TLS + Unix). " + _connection_hint(errors)
     )
 
 
@@ -227,6 +317,7 @@ def verificar_transporte_gvm(
     host = _host(cfg)
     port = _port(cfg)
     details: List[str] = []
+    candidates = _socket_candidates(cfg)
 
     def tls_ok() -> Optional[str]:
         if not tcp_port_open(host, port, timeout=2.0):
@@ -243,7 +334,7 @@ def verificar_transporte_gvm(
             return None
 
     def unix_ok() -> Optional[str]:
-        for path in _socket_candidates(cfg):
+        for path in candidates:
             if not os.path.exists(path):
                 details.append(f"Unix {path}: no existe")
                 continue
@@ -267,20 +358,20 @@ def verificar_transporte_gvm(
         if mode == "unix":
             msg = unix_ok()
             if msg:
-                # path is inside msg
-                for path in _socket_candidates(cfg):
+                for path in candidates:
                     if path in (msg or ""):
                         _resolved = {"type": "unix", "path": path}
                         break
                 return {"status": "ok", "message": f"GVM conectado ({msg})", "transport": "unix"}
-            return {"status": "error", "message": f"GVM Unix falló: {'; '.join(details)}", "transport": None}
+            return {
+                "status": "error",
+                "message": f"GVM Unix falló: {'; '.join(details)} | {MOUNT_HINT}",
+                "transport": None,
+            }
 
-        # auto: cualquiera vale; TLS preferido en mensaje si ambos
         tmsg = tls_ok()
         if tmsg:
             _resolved = {"type": "tls", "host": host, "port": port}
-            umsg = None
-            # no hace falta unix si tls va
             return {
                 "status": "ok",
                 "message": f"GVM conectado ({tmsg})",
@@ -289,7 +380,7 @@ def verificar_transporte_gvm(
 
         umsg = unix_ok()
         if umsg:
-            for path in _socket_candidates(cfg):
+            for path in candidates:
                 if path in umsg:
                     _resolved = {"type": "unix", "path": path}
                     break
@@ -301,7 +392,10 @@ def verificar_transporte_gvm(
 
         return {
             "status": "error",
-            "message": "GVM no responde por TLS ni Unix: " + "; ".join(details),
+            "message": "GVM no responde por TLS ni Unix: "
+            + "; ".join(details)
+            + " | "
+            + MOUNT_HINT,
             "transport": None,
         }
     except Exception as e:

@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.5.17] - 2026-07-23
+
+### Mejorado
+- **`gvm_connect.py`**: si no hay socket en el host, descubre el de gvmd vía Docker
+  (bind mount de `/run/gvmd` o `/proc/<pid>/root/run/gvmd/gvmd.sock`).
+  Mensaje de error con la línea exacta de volumen a añadir al compose.
+
 ## [2.5.16] - 2026-07-23
 
 ### Corregido
