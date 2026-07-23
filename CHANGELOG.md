@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.5.14] - 2026-07-23
+
+### Añadido
+- **`Targets_Tasks/run_task_name.py`**: arranca una tarea GVM por **nombre exacto** (sin distinguir mayúsculas). Arranca aunque otras tareas estén en curso; si la pedida ya está `Running`/`Requested`/`Queued` no relanza (exit 0). Respeta el lock de mantenimiento. Uso: `python3 run_task_name.py "Mi Tarea"`.
+
+### Documentación
+- `README.md`: uso de `run_task_name.py`.
+
 ## [2.5.13] - 2026-06-01
 
 ### Añadido
