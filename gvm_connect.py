@@ -21,6 +21,8 @@ import json
 import os
 import socket
 import subprocess
+import sys
+import time
 from typing import Any, Dict, List, Optional, Tuple
 
 from gvm.connections import TLSConnection, UnixSocketConnection
@@ -42,8 +44,12 @@ DEFAULT_SOCKET_CANDIDATES = (
 MOUNT_HINT = (
     "En docker-compose del contenedor openvas añade el volumen "
     "'/opt/gvm/run/gvmd:/run/gvmd' y recrea el contenedor "
-    "(docker compose up -d). Así el socket queda en el host."
+    "(docker compose up -d). Así el socket queda en el host. "
+    "Alternativa sin recrear: python3 /opt/gvm/Update/gvmd_docker_proxy.py"
 )
+
+DEFAULT_HOST_PROXY_SOCK = "/opt/gvm/run/gvmd/gvmd.sock"
+DOCKER_PROXY_SCRIPT = "/opt/gvm/Update/gvmd_docker_proxy.py"
 
 # Cache de transporte que funcionó en este proceso (evita re-probar en cada reconnect)
 _resolved: Optional[Dict[str, Any]] = None
@@ -210,6 +216,67 @@ def _build_from_resolved(timeout: int):
     return None
 
 
+def _ensure_docker_proxy(cfg: dict, verbose: bool = False) -> Optional[str]:
+    """
+    Si no hay socket usable en el host, levanta proxy Unix->docker exec.
+    Requiere permiso docker y python3 en el contenedor.
+    Devuelve la ruta del socket local o None.
+    """
+    host_sock = str(cfg.get("gvm_socket") or DEFAULT_HOST_PROXY_SOCK).strip()
+    container = _docker_container_name(cfg)
+
+    # ¿Ya hay proxy/socket usable?
+    if os.path.exists(host_sock):
+        try:
+            ok, _ = probe_connection(make_unix_connection(host_sock, 5))
+            if ok:
+                return host_sock
+        except Exception:
+            pass
+
+    script = DOCKER_PROXY_SCRIPT
+    # En desarrollo: ruta relativa al repo
+    if not os.path.isfile(script):
+        alt = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Update", "gvmd_docker_proxy.py")
+        if os.path.isfile(alt):
+            script = alt
+    if not os.path.isfile(script):
+        if verbose:
+            print(f"[WARNING] No está {DOCKER_PROXY_SCRIPT}; no se puede crear proxy Docker")
+        return None
+
+    if verbose:
+        print(f"[INFO] Arrancando proxy GMP Docker → {host_sock} (contenedor {container})...")
+
+    try:
+        r = subprocess.run(
+            [sys.executable, script, "-c", container, "-s", host_sock],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+    except (OSError, subprocess.SubprocessError) as e:
+        if verbose:
+            print(f"[WARNING] Proxy Docker no arrancó: {e}")
+        return None
+
+    if verbose and (r.stdout or r.stderr):
+        for line in ((r.stdout or "") + (r.stderr or "")).splitlines():
+            print(f"[INFO] proxy: {line}")
+
+    if r.returncode != 0:
+        return None
+
+    # Esperar a que el socket acepte
+    for _ in range(30):
+        if os.path.exists(host_sock):
+            ok, detail = probe_connection(make_unix_connection(host_sock, 5))
+            if ok:
+                return host_sock
+        time.sleep(0.2)
+    return None
+
+
 def _try_unix_paths(paths: List[str], ptimeout: int, timeout: int, verbose: bool, errors: List[str]):
     global _resolved
     for path in paths:
@@ -275,6 +342,13 @@ def connect_gvm(
         conn = _try_unix_paths(candidates, ptimeout, timeout, verbose, errors)
         if conn is not None:
             return conn
+        proxy_sock = _ensure_docker_proxy(cfg, verbose=verbose)
+        if proxy_sock:
+            ok, detail = probe_connection(make_unix_connection(proxy_sock, ptimeout))
+            if ok:
+                _resolved = {"type": "unix", "path": proxy_sock}
+                return make_unix_connection(proxy_sock, timeout)
+            errors.append(f"unix:{proxy_sock} (proxy): {detail}")
         raise ConnectionError("GVM Unix falló. " + _connection_hint(errors))
 
     # --- auto: TLS primero (compat hosts 9390), luego Unix ---
@@ -296,6 +370,19 @@ def connect_gvm(
     conn = _try_unix_paths(candidates, ptimeout, timeout, verbose, errors)
     if conn is not None:
         return conn
+
+    # Último recurso: proxy host -> docker exec (usuario con grupo docker)
+    proxy_sock = _ensure_docker_proxy(cfg, verbose=verbose)
+    if proxy_sock:
+        ok, detail = probe_connection(make_unix_connection(proxy_sock, ptimeout))
+        if ok:
+            _resolved = {"type": "unix", "path": proxy_sock}
+            if verbose:
+                print(f"[INFO] GVM auto → proxy Docker {proxy_sock}")
+            return make_unix_connection(proxy_sock, timeout)
+        errors.append(f"unix:{proxy_sock} (proxy): {detail}")
+    else:
+        errors.append("proxy docker: no disponible")
 
     raise ConnectionError(
         "No se pudo conectar a GVM (auto: TLS + Unix). " + _connection_hint(errors)

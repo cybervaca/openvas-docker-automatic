@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.5.18] - 2026-07-23
+
+### Añadido
+- **`Update/gvmd_docker_proxy.py`** + **`gvmd_stdio_relay.py`**: proxy Unix en el host
+  hacia `gvmd.sock` del contenedor vía `docker exec` (sin montar volumen ni root).
+- **`gvm_connect.py`**: si TLS y sockets locales fallan, arranca el proxy automáticamente
+  y conecta a `/opt/gvm/run/gvmd/gvmd.sock`.
+
 ## [2.5.17] - 2026-07-23
 
 ### Mejorado
