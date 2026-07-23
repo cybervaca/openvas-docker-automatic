@@ -1,5 +1,18 @@
 # Changelog
 
+## [2.5.16] - 2026-07-23
+
+### Corregido
+- **Actualización en flota**: `git pull` fallaba en Git reciente con ramas divergentes
+  (`Necesita especificar cómo reconciliar las ramas divergentes`).
+- **`Update/update-script.py`**: pasa a `git fetch` + `git reset --hard origin/main`
+  (determinista; no usa `git pull`). `Config/config.json` se conserva (está en `.gitignore`).
+- **`Update/sync-from-github.sh`**: mismo flujo; usable por `curl | bash` desde raw GitHub
+  cuando el repo local aún no tiene el script nuevo.
+
+### Documentación
+- `Update/README.md`: one-liner de emergencia y cron.
+
 ## [2.5.15] - 2026-07-23
 
 ### Añadido
