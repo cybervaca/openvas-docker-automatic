@@ -7,8 +7,12 @@ import subprocess
 import sys
 import os
 
-from gvm.connections import TLSConnection
 from gvm.protocols.gmp import Gmp
+
+_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+from gvm_connect import connect_gvm
 
 def get_excluded_hosts(target) -> str:
     """
@@ -37,8 +41,8 @@ def export_targets_csv(config_path: str, csv_path: str, page_size: int = 1000) -
     user = config.get("user")
     password = config.get("password")
 
-    # Conexión TLS (compatible con Docker y entornos locales)
-    connection = TLSConnection(hostname="127.0.0.1", port=9390)
+    # Conexión auto TLS/Unix (compatible con Docker actual y hosts 9390)
+    connection = connect_gvm(config=config, verbose=True)
 
     all_targets = []
     with Gmp(connection=connection) as gmp:

@@ -3,7 +3,6 @@ import warnings
 warnings.filterwarnings('ignore', category=DeprecationWarning)
 warnings.filterwarnings('ignore', category=UserWarning)
 
-from gvm.connections import TLSConnection
 from gvm.protocols.gmp import Gmp
 from gvm.errors import GvmError
 import xml.etree.ElementTree as ET
@@ -19,6 +18,11 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
 from email import encoders
+
+_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+from gvm_connect import connect_gvm
 
 GVM_CONNECTION_TIMEOUT = 900  # Listar muchas tareas/reportes puede tardar más de 60s.
 SHAREPOINT_UPLOAD_SCRIPT = "/opt/gvm/Reports/subida_share.py"
@@ -104,12 +108,6 @@ def email(file1, file2, configuracion):
         # Cierra la conexión
         smtp.quit()
 
-def connect_gvm():
-    # Conexión TLS a GVM
-    connection = TLSConnection(hostname="127.0.0.1", port=9390, timeout=GVM_CONNECTION_TIMEOUT)
-    return connection
-
-
 def verificar_mantenimiento_activo():
     """
     Verifica si hay un mantenimiento en curso consultando el archivo de lock.
@@ -170,8 +168,8 @@ def ejecutar_operacion_gmp(operacion_func, user, password, max_intentos=3, delay
     ultimo_error = None
     for intento in range(1, max_intentos + 1):
         try:
-            # Crear nueva conexión para cada intento
-            nueva_conexion = connect_gvm()
+            # Crear nueva conexión para cada intento (auto TLS/Unix)
+            nueva_conexion = connect_gvm(timeout=GVM_CONNECTION_TIMEOUT)
             with Gmp(connection=nueva_conexion) as gmp:
                 gmp.authenticate(user, password)
                 return operacion_func(gmp)
@@ -346,7 +344,7 @@ if __name__ == "__main__":
     configuracion = leer_configuracion()
     user = configuracion.get('user')
     password = configuracion.get('password')
-    connection = connect_gvm()
+    connection = connect_gvm(timeout=GVM_CONNECTION_TIMEOUT, config=configuracion, verbose=True)
     resultado = start_task(connection, user, password, configuracion, mensual=args.mensual)
     if resultado == 0:
         print("Finalizamos sin lanzar")

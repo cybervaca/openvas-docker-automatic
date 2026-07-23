@@ -13,9 +13,13 @@ import sys
 import time
 import xml.etree.ElementTree as ET
 
-from gvm.connections import TLSConnection
 from gvm.errors import GvmError
 from gvm.protocols.gmp import Gmp
+
+_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+from gvm_connect import connect_gvm
 
 GVM_CONNECTION_TIMEOUT = 900
 TASK_LOG = "/opt/gvm/taskslog.txt"
@@ -33,10 +37,6 @@ def write_log(mensaje, log=TASK_LOG):
 def leer_configuracion(config_path):
     with open(config_path, "r", encoding="utf-8") as archivo:
         return json.load(archivo)
-
-
-def connect_gvm():
-    return TLSConnection(hostname="127.0.0.1", port=9390, timeout=GVM_CONNECTION_TIMEOUT)
 
 
 def verificar_mantenimiento_activo():
@@ -76,7 +76,7 @@ def ejecutar_operacion_gmp(operacion_func, user, password, max_intentos=3, delay
     ultimo_error = None
     for intento in range(1, max_intentos + 1):
         try:
-            nueva_conexion = connect_gvm()
+            nueva_conexion = connect_gvm(timeout=GVM_CONNECTION_TIMEOUT)
             with Gmp(connection=nueva_conexion) as gmp:
                 gmp.authenticate(user, password)
                 return operacion_func(gmp)

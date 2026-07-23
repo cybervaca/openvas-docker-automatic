@@ -6,13 +6,13 @@ warnings.filterwarnings('ignore', category=UserWarning)
 import pandas as pd
 import getpass
 import xml.etree.ElementTree as ET
-from gvm.connections import TLSConnection
 from gvm.protocols.gmp import Gmp
 from gvm.xml import pretty_print
 import untangle
 import base64
 import csv, json
 import os, glob
+import sys
 import datetime
 import subprocess
 import shutil
@@ -23,6 +23,11 @@ from email.mime.base import MIMEBase
 from email import encoders
 import ipaddress
 import argparse
+
+_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+from gvm_connect import connect_gvm
 
 GVM_CONNECTION_TIMEOUT = 900  # Reportes grandes pueden tardar varios minutos en descargarse.
 
@@ -89,12 +94,6 @@ def email(configuracion):
 def get_pass():
     password = getpass.getpass(prompt="Enter password: ")
     return password
-
-# Función para conectarse a GVM
-def connect_gvm():
-    # Conexión TLS a GVM
-    connection = TLSConnection(hostname="127.0.0.1", port=9390, timeout=GVM_CONNECTION_TIMEOUT)
-    return connection
 
 # Función para preparar el reporte
 def ready_report(connection, user, password, reportformat, host, reporte):

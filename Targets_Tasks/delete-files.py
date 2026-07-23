@@ -1,9 +1,14 @@
-from gvm.connections import TLSConnection
 from gvm.protocols.gmp import Gmp
 import xml.etree.ElementTree as ET
 import getpass
 import os, glob
+import sys
 import json
+
+_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+from gvm_connect import connect_gvm
 
 def leer_configuracion():
     try:
@@ -24,8 +29,8 @@ def get_pass():
 configuracion = leer_configuracion()
 user = configuracion.get('user')
 password = configuracion.get('password')
-# Usar TLS en lugar de Unix Socket (compatible con Docker)
-connection = TLSConnection(hostname="127.0.0.1", port=9390)
+# Conexión auto TLS/Unix (compatible con Docker e instalaciones 9390)
+connection = connect_gvm(config=configuracion, verbose=True)
 
 # using the with statement to automatically connect and disconnect to gvmd
 with Gmp(connection=connection) as gmp:

@@ -20,9 +20,17 @@ try:
     import socks  # PySocks para soporte SOCKS5
 except ImportError:
     socks = None
-from gvm.connections import TLSConnection
 from gvm.protocols.gmp import Gmp
 import xml.etree.ElementTree as ET
+
+_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+from gvm_connect import (
+    verificar_transporte_gvm,
+    tcp_port_open,
+    DEFAULT_SOCKET_CANDIDATES,
+)
 
 # Configuración
 CONFIG_PATH = '/opt/gvm/Config/config.json'
@@ -460,29 +468,47 @@ def verificar_puerto(host, port):
     except Exception as e:
         return {'status': 'error', 'message': f'Error al verificar puerto: {str(e)}'}
 
-def verificar_gvm_connection(config):
-    """Verifica la conexión TLS a GVM"""
+def verificar_gvm_listener(config):
+    """
+    Comprueba si gvmd es alcanzable por TCP 9390 o por socket Unix.
+    No marca error solo porque falte el 9390 si el socket Unix existe.
+    """
+    host = str(config.get("gvm_host") or "127.0.0.1")
     try:
-        username = config.get('user', 'admin')
-        password = config.get('password', '')
-        
+        port = int(config.get("gvm_port") or GVM_PORT)
+    except (TypeError, ValueError):
+        port = GVM_PORT
+
+    if tcp_port_open(host, port, timeout=2.0):
+        return {"status": "ok", "message": f"Puerto {port} abierto (TLS)"}
+
+    paths = []
+    custom = config.get("gvm_socket")
+    if custom:
+        paths.append(str(custom).strip())
+    paths.extend(DEFAULT_SOCKET_CANDIDATES)
+    for path in paths:
+        if path and os.path.exists(path):
+            return {
+                "status": "ok",
+                "message": f"Puerto {port} cerrado; socket Unix presente: {path}",
+            }
+
+    return {
+        "status": "error",
+        "message": f"Sin listener TLS {host}:{port} ni socket Unix de gvmd",
+    }
+
+
+def verificar_gvm_connection(config):
+    """Verifica la conexión GMP a GVM (TLS y/o Unix según config/auto)."""
+    try:
+        password = config.get("password", "")
         if not password:
-            return {'status': 'warning', 'message': 'Password no configurado'}
-        
-        connection = TLSConnection(hostname="127.0.0.1", port=GVM_PORT)
-        
-        with Gmp(connection=connection) as gmp:
-            response = gmp.get_version()
-            root = ET.fromstring(response)
-            status = root.get("status")
-            
-            if status == "200":
-                version = root.find("version").text
-                return {'status': 'ok', 'message': f'GVM conectado (v{version})'}
-            else:
-                return {'status': 'error', 'message': f'GVM respondió con status: {status}'}
+            return {"status": "warning", "message": "Password no configurado"}
+        return verificar_transporte_gvm(config=config, timeout=30)
     except Exception as e:
-        return {'status': 'error', 'message': f'Error de conexión GVM: {str(e)}'}
+        return {"status": "error", "message": f"Error de conexión GVM: {str(e)}"}
 
 def obtener_fecha_feed(feed_type):
     """
@@ -1034,10 +1060,10 @@ def ejecutar_verificaciones(config):
     if docker['status'] != 'ok':
         resultados['status'] = 'error'
     
-    # Verificar puerto GVM (gvmd)
-    gvmd_port = verificar_puerto('127.0.0.1', GVM_PORT)
+    # Verificar listener GVM (TCP 9390 o socket Unix)
+    gvmd_port = verificar_gvm_listener(config)
     resultados['checks']['gvmd'] = gvmd_port['status']
-    escribir_log(f"Puerto GVM (9390): {gvmd_port['message']}")
+    escribir_log(f"Listener GVM: {gvmd_port['message']}")
     if gvmd_port['status'] != 'ok':
         resultados['status'] = 'error'
     

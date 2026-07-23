@@ -3,10 +3,15 @@ import getpass
 import csv
 import os
 import re
+import sys
 import importlib
 import xml.etree.ElementTree as ET
-from gvm.connections import TLSConnection
 from gvm.protocols.gmp import Gmp
+
+_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+from gvm_connect import connect_gvm
 # Intentar importar HostsOrdering desde diferentes ubicaciones posibles
 try:
     HostsOrdering = getattr(importlib.import_module('gvm.protocols.gmp.types'), 'HostsOrdering')
@@ -159,11 +164,6 @@ def resolve_duplicate_titles(df):
 def get_pass():
     password=getpass.getpass(prompt='Enter password: ')
     return password
-
-def connect_gvm():
-    # Conexión TLS a GVM
-    connection = TLSConnection(hostname="127.0.0.1", port=9390)
-    return connection
 
 def get_full_and_fast_config_id(gmp):
     """
@@ -361,8 +361,8 @@ if __name__ == '__main__':
         exit(1)
     print("Conectando a GVM...")
     try:
-        connection= connect_gvm()
-        ready_target(connection,username,password,df)
+        connection = connect_gvm(verbose=True)
+        ready_target(connection, username, password, df)
     except Exception as e:
         print(f"ERROR al conectar o procesar: {e}")
         import traceback

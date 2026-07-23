@@ -16,6 +16,7 @@ Sistema automatizado para gestión de OpenVAS/GVM con Docker, incluyendo creaci�
 ```
 openvas-docker-automatic/
 ├── Config/              # Configuración (config.json)
+├── gvm_connect.py       # Conexión GMP dual (TLS 9390 / Unix socket)
 ├── Monitor/             # Servicio de monitoreo con alertas Telegram
 ├── Reports/             # Scripts de generación y exportación de reportes
 ├── Targets_Tasks/       # Scripts de gestión de targets y tasks
@@ -42,6 +43,31 @@ Ver [DOCKER.md](DOCKER.md) para más detalles.
 2. Instalar dependencias: `pip install -r requirements.txt`
 3. Configurar `/opt/gvm/Config/config.json`
 4. Configurar scripts de cron según necesidades
+
+## Conexión a GVM (TLS 9390 y/o Unix socket)
+
+Los scripts usan [`gvm_connect.py`](gvm_connect.py) con modo **`auto`** por defecto:
+
+1. Si `127.0.0.1:9390` acepta TLS GMP → se usa (hosts actuales no se rompen).
+2. Si no, se prueba el socket Unix (`/opt/gvm/run/gvmd/gvmd.sock`, `/run/gvmd/gvmd.sock`, …).
+
+En `config.json` (opcional):
+
+```json
+"gvm_connection": "auto",
+"gvm_host": "127.0.0.1",
+"gvm_port": 9390,
+"gvm_socket": "/opt/gvm/run/gvmd/gvmd.sock"
+```
+
+Valores de `gvm_connection`: `auto` | `tls` | `unix`.
+
+Para imágenes `immauss/openvas` que solo exponen Unix socket, montad el directorio del socket en el host (ver [`docker-compose-example.yml`](docker-compose-example.yml)):
+
+```yaml
+volumes:
+  - /opt/gvm/run/gvmd:/run/gvmd
+```
 
 ## Ejecución programada y modo mensual
 

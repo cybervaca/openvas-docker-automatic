@@ -15,12 +15,14 @@ services:
 
     ports:
       - "127.0.0.1:9392:9392"   # Web UI solo localhost
-      - "127.0.0.1:9390:9390"   # Comunicacion interna
+      - "127.0.0.1:9390:9390"   # GMP TLS (si gvmd lo expone; en imágenes nuevas puede no haber listener)
       - "127.0.0.1:5432:5432"   # PostgreSQL solo localhost
 
     volumes:
       - openvas-data:/data
       - /opt/gvm:/opt/gvm
+      # Socket gvmd visible en el host para openvas-docker-automatic (modo unix/auto)
+      - /opt/gvm/run/gvmd:/run/gvmd
 
     environment:
       - PASSWORD=admin

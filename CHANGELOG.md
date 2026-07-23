@@ -1,5 +1,19 @@
 # Changelog
 
+## [2.5.15] - 2026-07-23
+
+### Añadido
+- **`gvm_connect.py`**: conexión GMP dual **TLS (9390) + Unix socket**, modo por defecto **`auto`**.
+  - Prueba primero TLS (no rompe hosts que ya hablan por 9390).
+  - Si el puerto está cerrado o TLS falla, prueba sockets (`/opt/gvm/run/gvmd/gvmd.sock`, `/run/gvmd/gvmd.sock`, …).
+  - Config opcional en `config.json`: `gvm_connection` (`auto`|`tls`|`unix`), `gvm_host`, `gvm_port`, `gvm_socket`.
+- Scripts de Targets/Reports/Monitor usan el helper compartido.
+- **Monitor**: el check de gvmd acepta TCP **o** socket Unix (sin falso positivo solo por falta de 9390).
+- **`docker-compose-example.yml`**: volumen `/opt/gvm/run/gvmd:/run/gvmd` para exponer el socket al host.
+
+### Documentación
+- `README.md`, `Config/config_example.json`: claves de conexión GVM.
+
 ## [2.5.14] - 2026-07-23
 
 ### Añadido

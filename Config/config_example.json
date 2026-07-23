@@ -15,6 +15,10 @@
     "aws_secret_access_key":"1",
     "s3bucket":"1",
     "version": "1.2026.01.28_1",
+    "gvm_connection": "auto",
+    "gvm_host": "127.0.0.1",
+    "gvm_port": 9390,
+    "gvm_socket": "/opt/gvm/run/gvmd/gvmd.sock",
     "monitoring": {
         "enabled": true,
         "check_interval": 300,
