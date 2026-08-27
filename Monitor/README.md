@@ -9,6 +9,7 @@ Servicio de monitoreo completo que verifica el estado del contenedor Docker, ser
 - ✅ Verificación de servicios GVM (gvmd, gsad)
 - ✅ Verificación de conexión TLS a GVM
 - ✅ Verificación de actualización de feeds de vulnerabilidades
+- ✅ Verificación de espacio en disco (alerta si quedan ≤5 GB libres)
 - ✅ Detección de actualizaciones de imagen
 - ✅ Alertas por Telegram con formato estructurado
 - ✅ Logs estructurados en JSON
@@ -127,6 +128,11 @@ Edita `/opt/gvm/Config/config.json` y añade la sección `monitoring`:
     "alert_on_docker_down": true,
     "alert_on_gvm_down": true,
     "alert_on_image_update": true,
+    "alert_on_feeds_stale": true,
+    "feed_stale_days": 30,
+    "alert_on_disk_low": true,
+    "disk_min_free_gb": 5,
+    "disk_paths": ["/"],
     "alert_cooldown": 3600,
     "telegram": {
       "bot_token": "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
@@ -146,19 +152,30 @@ Edita `/opt/gvm/Config/config.json` y añade la sección `monitoring`:
 - `alert_on_image_update`: Enviar alerta si hay actualización de imagen disponible (true/false)
 - `alert_on_feeds_stale`: Enviar alerta si los feeds están desactualizados (true/false)
 - `feed_stale_days`: Número de días sin actualizar para considerar un feed como desactualizado (default: 30)
+- `alert_on_disk_low`: Enviar alerta si el espacio libre es ≤ umbral (true/false, default: true)
+- `disk_min_free_gb`: GB libres mínimos antes de alertar (default: 5)
+- `disk_paths`: Lista de rutas a vigilar; se deduplican por partición (default: `["/"]`)
 - `alert_cooldown`: Tiempo en segundos entre alertas del mismo tipo (3600 = 1 hora)
 - `telegram.bot_token`: Token del bot de Telegram obtenido de @BotFather
 - `telegram.chat_id`: Tu chat_id de Telegram
 
-### 3. Instalar el Servicio
+### 3. Instalar el Servicio (solo la primera vez)
 
-Ejecuta el script de instalación:
+Ejecuta el script de instalación **solo en la primera instalación** o si cambian las units systemd:
 
 ```bash
 sudo ./Monitor/install-monitor.sh
 ```
 
-El script:
+Para actualizar el código del monitor en servidores ya instalados (p. ej. nueva alerta de disco), **no reinstales**. Sincroniza el repo:
+
+```bash
+bash /opt/gvm/Update/sync-from-github.sh
+```
+
+El timer systemd seguirá ejecutando el `monitor.py` actualizado en el siguiente ciclo (≤5 min). Los defaults de disco (`alert_on_disk_low`, `disk_min_free_gb: 5`) están en el código: no hace falta editar `config.json` en cada servidor salvo que quieras otro umbral o rutas.
+
+El script de instalación:
 - Copia los archivos necesarios a `/opt/gvm/Monitor/`
 - Instala los archivos systemd
 - Crea los directorios de logs
@@ -245,6 +262,7 @@ El servicio envía alertas formateadas con emojis para identificar el tipo:
 - 🌐 **GSAD:** El puerto 9392 (web UI) no responde
 - 🔌 **Conexión GVM:** No se puede conectar a GVM vía TLS
 - 📦 **Feeds:** Los feeds de vulnerabilidades están desactualizados (>30 días)
+- 💾 **Disco:** Quedan ≤5 GB libres en alguna partición vigilada (configurable)
 - 🔄 **Imagen:** Hay una actualización disponible para la imagen Docker
 - 📤 **SharePoint:** Falló la subida de los **reportes principales** (CSV/XLSX) a SharePoint. **`exclusion.csv` no genera alerta** (muchas instalaciones no tienen exclusiones): `subida_share.py` sale con éxito si falta o está vacío, y `get-reports-test.py` no envía Telegram para esa fase.
 
@@ -348,7 +366,13 @@ El servicio verifica los siguientes aspectos:
    - Ejecuta `/opt/gvm/Cron/actualiza_gvm.sh` automáticamente si algún feed lleva `>= 15` días sin actualizar
    - Evita ejecuciones repetidas con un cooldown separado de `24h`
 
-7. **Actualización de Imagen:**
+7. **Espacio en Disco:**
+   - Usa `shutil.disk_usage` sobre las rutas de `disk_paths` (default: `/`)
+   - Deduplica por partición si varias rutas apuntan al mismo filesystem
+   - Alerta si el espacio libre es ≤ `disk_min_free_gb` (default: 5 GB)
+   - Activo por defecto (`alert_on_disk_low: true`) sin editar `config.json`
+
+8. **Actualización de Imagen:**
    - Verifica si hay actualizaciones disponibles para `immauss/openvas:latest`
    - Usa `docker pull --dry-run`
 

@@ -11,6 +11,7 @@ warnings.filterwarnings('ignore', category=UserWarning)
 
 import json
 import os
+import shutil
 import subprocess
 import datetime
 import socket
@@ -452,6 +453,79 @@ def verificar_docker_daemon():
         return {'status': 'error', 'message': 'Timeout al verificar Docker daemon'}
     except Exception as e:
         return {'status': 'error', 'message': f'Error: {str(e)}'}
+
+def verificar_disco(config):
+    """Verifica espacio libre en disco (umbral por defecto: 5 GB)"""
+    monitoring_config = config.get('monitoring', {})
+    min_free_gb = float(monitoring_config.get('disk_min_free_gb', 5))
+    paths = monitoring_config.get('disk_paths', ['/'])
+    if not isinstance(paths, list) or not paths:
+        paths = ['/']
+
+    min_free_bytes = min_free_gb * (1024 ** 3)
+    seen_devs = set()
+    partitions = []
+
+    for path in paths:
+        try:
+            if not os.path.exists(path):
+                partitions.append({
+                    'path': path,
+                    'status': 'error',
+                    'free_gb': None,
+                    'total_gb': None,
+                    'message': f'Ruta no existe: {path}'
+                })
+                continue
+
+            st = os.stat(path)
+            if st.st_dev in seen_devs:
+                continue
+            seen_devs.add(st.st_dev)
+
+            usage = shutil.disk_usage(path)
+            free_gb = usage.free / (1024 ** 3)
+            total_gb = usage.total / (1024 ** 3)
+            entry = {
+                'path': path,
+                'free_gb': round(free_gb, 2),
+                'total_gb': round(total_gb, 2),
+            }
+            if usage.free <= min_free_bytes:
+                entry['status'] = 'error'
+                entry['message'] = (
+                    f'{path}: {free_gb:.2f} GB libres de {total_gb:.2f} GB '
+                    f'(umbral {min_free_gb:g} GB)'
+                )
+            else:
+                entry['status'] = 'ok'
+                entry['message'] = f'{path}: {free_gb:.2f} GB libres de {total_gb:.2f} GB'
+            partitions.append(entry)
+        except Exception as e:
+            partitions.append({
+                'path': path,
+                'status': 'error',
+                'free_gb': None,
+                'total_gb': None,
+                'message': f'Error al verificar {path}: {str(e)}'
+            })
+
+    details = {
+        'min_free_gb': min_free_gb,
+        'partitions': partitions,
+        'low': [p for p in partitions if p.get('status') == 'error']
+    }
+
+    if any(p.get('status') == 'error' for p in partitions):
+        msgs = [p['message'] for p in partitions if p.get('status') == 'error']
+        return {'status': 'error', 'message': '; '.join(msgs), 'details': details}
+
+    msgs = [p['message'] for p in partitions]
+    return {
+        'status': 'ok',
+        'message': '; '.join(msgs) if msgs else 'Disco OK',
+        'details': details
+    }
 
 def verificar_puerto(host, port):
     """Verifica si un puerto está abierto y respondiendo"""
@@ -932,7 +1006,8 @@ def formatear_mensaje_alerta_completo(resultados, config, timestamp):
         'gvmd': '🛡️',
         'gsad': '🌐',
         'gvm_connection': '🔌',
-        'feeds': '📦'
+        'feeds': '📦',
+        'disk': '💾'
     }
     
     # Nombres descriptivos
@@ -942,7 +1017,8 @@ def formatear_mensaje_alerta_completo(resultados, config, timestamp):
         'gvmd': 'GVM (Puerto 9390)',
         'gsad': 'GSAD Web UI (Puerto 9392)',
         'gvm_connection': 'Conexión GVM TLS',
-        'feeds': 'Feeds de Vulnerabilidades'
+        'feeds': 'Feeds de Vulnerabilidades',
+        'disk': 'Espacio en Disco'
     }
     
     # Mensajes de estado
@@ -1017,6 +1093,25 @@ def formatear_mensaje_alerta_completo(resultados, config, timestamp):
                         mensaje += f"❓ <b>{feed_name}:</b> {feed_info.get('fecha', 'Desconocido')}\n"
                 mensaje += "\n"
     
+    # Añadir detalle de espacio en disco si hay problemas
+    if 'disk_details' in resultados and resultados.get('disk_details'):
+        disk_details = resultados['disk_details']
+        low = disk_details.get('low', [])
+        if low:
+            mensaje += "\n" + "="*40 + "\n"
+            mensaje += "<b>💾 ESPACIO EN DISCO BAJO:</b>\n\n"
+            min_free = disk_details.get('min_free_gb', 5)
+            mensaje += f"Umbral: {min_free:g} GB libres\n\n"
+            for part in low:
+                path = part.get('path', '?')
+                free_gb = part.get('free_gb')
+                total_gb = part.get('total_gb')
+                if free_gb is not None and total_gb is not None:
+                    mensaje += f"• <b>{path}:</b> {free_gb:.2f} GB libres / {total_gb:.2f} GB total\n"
+                else:
+                    mensaje += f"• <b>{path}:</b> {part.get('message', 'Error')}\n"
+            mensaje += "\n"
+    
     # Añadir acciones recomendadas si hay problemas
     if alertas:
         mensaje += "\n" + "="*40 + "\n"
@@ -1028,7 +1123,8 @@ def formatear_mensaje_alerta_completo(resultados, config, timestamp):
             'gvmd': "🛡️ GVM: Verificar logs con 'docker logs openvas'",
             'gsad': "🌐 GSAD: Verificar que el puerto 9392 esté accesible",
             'gvm_connection': "🔌 Conexión: Verificar credenciales y que GVM esté funcionando",
-            'feeds': "📦 Feeds: Ejecutar '/opt/gvm/Cron/actualiza_gvm.sh'"
+            'feeds': "📦 Feeds: Ejecutar '/opt/gvm/Cron/actualiza_gvm.sh'",
+            'disk': "💾 Disco: Liberar espacio (logs, imágenes Docker huérfanas, reportes antiguos)"
         }
         
         for check_name, status in checks.items():
@@ -1165,6 +1261,14 @@ def ejecutar_verificaciones(config):
         resultados['checks']['feeds'] = 'error'
         resultados['feeds_details'] = {}
         escribir_log("Feeds: No se puede verificar (GVM no conectado)")
+
+    # Verificar espacio en disco
+    disco = verificar_disco(config)
+    resultados['checks']['disk'] = disco['status']
+    resultados['disk_details'] = disco.get('details', {})
+    escribir_log(f"Disco: {disco['message']}")
+    if disco['status'] != 'ok':
+        resultados['status'] = 'error'
     
     return resultados
 
@@ -1214,6 +1318,10 @@ def enviar_alertas(resultados, config):
     if monitoring_config.get('alert_on_feeds_stale', True):
         if checks.get('feeds') == 'warning' or checks.get('feeds') == 'error':
             tiene_problemas = True
+
+    # Verificar espacio en disco
+    if monitoring_config.get('alert_on_disk_low', True) and checks.get('disk') != 'ok':
+        tiene_problemas = True
     
     # Enviar mensaje completo solo si hay problemas o si se quiere reportar estado OK
     # Por ahora solo enviamos si hay problemas (para evitar spam cuando todo está OK)

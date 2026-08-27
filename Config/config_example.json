@@ -28,6 +28,9 @@
         "alert_on_image_update": true,
         "alert_on_feeds_stale": true,
         "feed_stale_days": 30,
+        "alert_on_disk_low": true,
+        "disk_min_free_gb": 5,
+        "disk_paths": ["/"],
         "alert_cooldown": 3600,
         "force_send": false,
         "telegram": {
