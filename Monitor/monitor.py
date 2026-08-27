@@ -590,16 +590,28 @@ FEED_TYPES = ('NVT', 'SCAP', 'CERT', 'GVMD_DATA')
 
 def parse_feed_version_date(version_str):
     """
-    Parsea versión de feed tipo YYYYMMDDTHHMM (p. ej. 20260814T0620) a datetime.
+    Parsea versión de feed a datetime. Acepta:
+    - YYYYMMDDTHHMM (p. ej. 20260814T0620, como en la UI)
+    - YYYYMMDDHHMM  (p. ej. 202608140620, como a veces devuelve GMP)
+    - YYYYMMDD      (p. ej. 20260814)
     Devuelve None si el formato no es válido.
     """
     if not version_str:
         return None
     value = str(version_str).strip()
-    if 'T' not in value or len(value) < 8:
+    if not value:
         return None
-    fecha_str = value.split('T')[0]
-    if len(fecha_str) != 8:
+
+    if 'T' in value:
+        fecha_str = value.split('T')[0]
+    else:
+        # Solo dígitos: YYYYMMDD o YYYYMMDDHHMM...
+        digits = ''.join(c for c in value if c.isdigit())
+        if len(digits) < 8:
+            return None
+        fecha_str = digits[:8]
+
+    if len(fecha_str) != 8 or not fecha_str.isdigit():
         return None
     try:
         return datetime.datetime.strptime(fecha_str, '%Y%m%d')
