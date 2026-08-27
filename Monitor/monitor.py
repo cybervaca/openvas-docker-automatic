@@ -31,6 +31,7 @@ from gvm_connect import (
     verificar_transporte_gvm,
     tcp_port_open,
     DEFAULT_SOCKET_CANDIDATES,
+    connect_gvm,
 )
 
 # Configuración
@@ -584,391 +585,257 @@ def verificar_gvm_connection(config):
     except Exception as e:
         return {"status": "error", "message": f"Error de conexión GVM: {str(e)}"}
 
-def obtener_fecha_feed(feed_type):
+FEED_TYPES = ('NVT', 'SCAP', 'CERT', 'GVMD_DATA')
+
+
+def parse_feed_version_date(version_str):
     """
-    Obtiene la fecha de última actualización de un feed.
-    Basado en el método del proyecto original maintenance.py.
-    Intenta múltiples métodos: base de datos (tabla info), archivos de feed.
-    
-    Args:
-        feed_type: Tipo de feed (NVT, SCAP, CERT, GVMD_DATA)
-    
-    Returns:
-        datetime.datetime o None: Fecha de última actualización del feed, o None si no se puede obtener
+    Parsea versión de feed tipo YYYYMMDDTHHMM (p. ej. 20260814T0620) a datetime.
+    Devuelve None si el formato no es válido.
     """
-    # Método 1: Consultar base de datos PostgreSQL para obtener versión del feed (más confiable)
-    # La tabla info contiene versiones de feeds con formato: YYYYMMDDTHHMM (ej: 20240126T0719)
+    if not version_str:
+        return None
+    value = str(version_str).strip()
+    if 'T' not in value or len(value) < 8:
+        return None
+    fecha_str = value.split('T')[0]
+    if len(fecha_str) != 8:
+        return None
     try:
-        feed_db_names = {
-            'NVT': 'nvt',
-            'SCAP': 'scap',
-            'CERT': 'cert',
-            'GVMD_DATA': 'gvmd_data'
-        }
-        
-        db_name = feed_db_names.get(feed_type, feed_type.lower())
-        
-        # Consultar tabla info para obtener versión del feed
-        # Las versiones suelen tener formato: YYYYMMDDTHHMM (ej: 20240126T0719)
-        queries = [
-            f"SELECT value FROM info WHERE name = '{db_name}_version' OR name = '{db_name}_feed_version';",
-            f"SELECT value FROM info WHERE name LIKE '%{db_name}%version%' ORDER BY name LIMIT 1;",
-            f"SELECT value FROM info WHERE name LIKE '%feed%{db_name}%' AND name LIKE '%version%' LIMIT 1;"
-        ]
-        
-        # Intentar múltiples métodos de conexión (como en el proyecto original)
-        for query in queries:
-            try:
-                # Método 1: Usar sudo -u postgres (como en el proyecto original)
-                result = subprocess.run(
-                    ['sudo', '-u', 'postgres', 'psql', '-d', 'gvmd', '-t', '-A', '-c', query],
-                    capture_output=True,
-                    text=True,
-                    timeout=10
-                )
-                
-                # Método 2: Si falla, intentar conexión directa
-                if result.returncode != 0:
-                    env = os.environ.copy()
-                    env['PGPASSWORD'] = 'admin'
-                    comando = f"""psql -h 127.0.0.1 -U postgres -d gvmd -t -A -c "{query}" """
-                    result = subprocess.run(
-                        comando,
-                        shell=True,
-                        capture_output=True,
-                        text=True,
-                        env=env,
-                        timeout=10
-                    )
-                
-                # Método 3: Si falla, intentar con docker exec
-                if result.returncode != 0:
-                    comando = f"""docker exec {CONTAINER_NAME} sudo -u postgres psql -U postgres -d gvmd -t -A -c "{query}" """
-                    result = subprocess.run(
-                        comando,
-                        shell=True,
-                        capture_output=True,
-                        text=True,
-                        timeout=10
-                    )
-                
-                if result.returncode == 0:
-                    value = result.stdout.strip()
-                    if value and value != '' and value != '0':
-                        # Los valores de versión suelen tener formato de timestamp
-                        # Ejemplo: 20240126T0719 (YYYYMMDDTHHMM)
-                        try:
-                            if 'T' in value and len(value) >= 8:
-                                # Formato: YYYYMMDDTHHMM
-                                fecha_str = value.split('T')[0]
-                                if len(fecha_str) == 8:  # Asegurar formato correcto
-                                    fecha = datetime.datetime.strptime(fecha_str, '%Y%m%d')
-                                    escribir_log(f"Feed {feed_type}: Fecha desde BD: {fecha.strftime('%Y-%m-%d')}", 'INFO')
-                                    return fecha
-                        except ValueError:
-                            continue
-            except Exception:
+        return datetime.datetime.strptime(fecha_str, '%Y%m%d')
+    except ValueError:
+        return None
+
+
+def _gmp_response_root(response):
+    """Normaliza respuesta GMP a ElementTree root (str o Element)."""
+    if response is None:
+        return None
+    if isinstance(response, str):
+        return ET.fromstring(response)
+    # ElementTree Element o compatible
+    if hasattr(response, 'tag'):
+        return response
+    if hasattr(response, 'getroot'):
+        return response.getroot()
+    return ET.fromstring(str(response))
+
+
+def obtener_feeds_via_gmp(config):
+    """
+    Obtiene versiones/fechas de feeds vía GMP get_feeds() (misma fuente que la UI).
+    Returns:
+        dict: { 'NVT': {'fecha': datetime, 'version': str, 'fuente': 'GMP'}, ... }
+              Vacío si falla la consulta.
+    """
+    resultados = {}
+    try:
+        user = config.get('user', 'admin')
+        password = config.get('password', '')
+        if not password:
+            escribir_log("Feeds GMP: password no configurado", 'WARNING')
+            return resultados
+
+        connection = connect_gvm(config=config, timeout=30, probe_timeout=15)
+        with Gmp(connection=connection) as gmp:
+            gmp.authenticate(user, password)
+            response = gmp.get_feeds()
+
+        root = _gmp_response_root(response)
+        if root is None:
+            escribir_log("Feeds GMP: respuesta vacía", 'WARNING')
+            return resultados
+
+        for feed_el in root.findall('.//feed'):
+            feed_type = (feed_el.findtext('type') or '').strip().upper()
+            version = (feed_el.findtext('version') or '').strip()
+            if feed_type not in FEED_TYPES:
+                # Algunas respuestas usan name en lugar de type
+                name = (feed_el.findtext('name') or '').strip().upper()
+                for ft in FEED_TYPES:
+                    if ft in name or name == ft:
+                        feed_type = ft
+                        break
+            if feed_type not in FEED_TYPES:
                 continue
-    except Exception:
-        pass
-    
-    # Método 2: Verificar archivos de feed directamente (fallback)
-    # Buscar archivos dentro del directorio y obtener la fecha más reciente (como proyecto original)
-    feed_dirs = {
-        'NVT': '/var/lib/openvas/plugins',
-        'SCAP': '/var/lib/gvm/scap-data',
-        'CERT': '/var/lib/gvm/cert-data',
-        'GVMD_DATA': '/var/lib/gvm/data-objects'
-    }
-    
-    feed_dir = feed_dirs.get(feed_type)
-    if feed_dir:
-        try:
-            # Patrones de archivos específicos por tipo de feed
-            file_patterns = {
-                'NVT': ['*.nasl'],
-                'SCAP': ['*.xml', '*.gz'],
-                'CERT': ['*.xml', '*.gz'],
-                'GVMD_DATA': ['*.xml', '*.gz']
-            }
-            
-            patterns = file_patterns.get(feed_type, ['*'])
-            max_mtime = 0
-            archivos_encontrados = 0
-            
-            # Buscar archivos con los patrones específicos usando docker exec
-            for pattern in patterns:
-                # Usar find dentro del contenedor para buscar archivos
-                find_cmd = ['docker', 'exec', CONTAINER_NAME, 'find', feed_dir, '-type', 'f', '-name', pattern]
-                result = subprocess.run(
-                    find_cmd,
-                    capture_output=True,
-                    text=True,
-                    timeout=30
+
+            fecha = parse_feed_version_date(version)
+            if fecha is None:
+                escribir_log(
+                    f"Feed {feed_type}: GMP version no parseable: {version!r}",
+                    'WARNING'
                 )
-                
-                if result.returncode == 0:
-                    files = result.stdout.strip().split('\n')
-                    for file_path in files[:200]:  # Limitar a primeros 200 archivos
-                        if not file_path:
-                            continue
-                        try:
-                            # Obtener timestamp de modificación del archivo
-                            stat_cmd = ['docker', 'exec', CONTAINER_NAME, 'stat', '-c', '%Y', file_path]
-                            stat_result = subprocess.run(
-                                stat_cmd,
-                                capture_output=True,
-                                text=True,
-                                timeout=5
-                            )
-                            if stat_result.returncode == 0:
-                                file_mtime = int(stat_result.stdout.strip())
-                                if file_mtime > max_mtime:
-                                    max_mtime = file_mtime
-                                archivos_encontrados += 1
-                        except (ValueError, subprocess.TimeoutExpired):
-                            continue
-            
-            # Si encontramos archivos, usar la fecha más reciente
-            if max_mtime > 0:
-                fecha = datetime.datetime.fromtimestamp(max_mtime)
-                escribir_log(f"Feed {feed_type}: Fecha desde directorio: {fecha.strftime('%Y-%m-%d %H:%M:%S')} ({archivos_encontrados} archivos)", 'INFO')
-                return fecha
-            
-            # Si no encontramos archivos con patrones, usar fecha del directorio como último recurso
+                continue
+
+            resultados[feed_type] = {
+                'fecha': fecha,
+                'version': version,
+                'fuente': 'GMP'
+            }
+            escribir_log(
+                f"Feed {feed_type}: Fecha desde GMP: {fecha.strftime('%Y-%m-%d')} "
+                f"(version={version})",
+                'INFO'
+            )
+
+        return resultados
+    except Exception as e:
+        escribir_log(f"Feeds GMP: error al consultar get_feeds(): {e}", 'WARNING')
+        return resultados
+
+
+def obtener_fecha_feed_psql_docker(feed_type):
+    """
+    Fallback: fecha del feed desde tabla info vía docker exec + psql (solo contenedor).
+    """
+    feed_db_names = {
+        'NVT': 'nvt',
+        'SCAP': 'scap',
+        'CERT': 'cert',
+        'GVMD_DATA': 'gvmd_data'
+    }
+    db_name = feed_db_names.get(feed_type, feed_type.lower())
+    queries = [
+        f"SELECT value FROM info WHERE name = '{db_name}_version' OR name = '{db_name}_feed_version';",
+        f"SELECT value FROM info WHERE name LIKE '%{db_name}%version%' ORDER BY name LIMIT 1;",
+    ]
+
+    for query in queries:
+        try:
             result = subprocess.run(
-                ['docker', 'exec', CONTAINER_NAME, 'stat', '-c', '%Y', feed_dir],
+                [
+                    'docker', 'exec', CONTAINER_NAME,
+                    'sudo', '-u', 'postgres',
+                    'psql', '-U', 'postgres', '-d', 'gvmd', '-t', '-A', '-c', query
+                ],
                 capture_output=True,
                 text=True,
-                timeout=10
+                timeout=15
             )
-            
-            if result.returncode == 0 and result.stdout.strip():
-                try:
-                    timestamp = int(result.stdout.strip())
-                    fecha = datetime.datetime.fromtimestamp(timestamp)
-                    escribir_log(f"Feed {feed_type}: Fecha desde directorio (sin archivos): {fecha.strftime('%Y-%m-%d %H:%M:%S')}", 'INFO')
-                    return fecha
-                except ValueError:
-                    pass
+            if result.returncode != 0:
+                continue
+            value = (result.stdout or '').strip()
+            if not value or value == '0':
+                continue
+            fecha = parse_feed_version_date(value)
+            if fecha is not None:
+                escribir_log(
+                    f"Feed {feed_type}: Fecha desde psql (docker): "
+                    f"{fecha.strftime('%Y-%m-%d')} (value={value})",
+                    'INFO'
+                )
+                return fecha
         except Exception as e:
-            escribir_log(f"Feed {feed_type}: Error al verificar directorio: {e}", 'DEBUG')
-            pass
-    
+            escribir_log(f"Feed {feed_type}: error psql docker: {e}", 'DEBUG')
+            continue
     return None
 
 
 def verificar_feeds(config, feed_stale_days=30):
     """
-    Verifica la fecha de última actualización de los feeds de OpenVAS.
-    Usa el método del proyecto original: consulta tabla info en PostgreSQL.
-    
-    Args:
-        config: Configuración del sistema
-        feed_stale_days: Número de días para considerar un feed como desactualizado (default: 30)
-    
-    Returns:
-        dict: {'status': 'ok'|'warning'|'error', 'message': str, 'details': dict}
-    """
-    try:
-        fecha_actual = datetime.datetime.now()
-        feeds_info = {}
-        feeds_stale = []
-        
-        # Mapeo de tipos de feeds
-        feed_types = {
-            'NVT': 'NVT',
-            'SCAP': 'SCAP',
-            'CERT': 'CERT',
-            'GVMD_DATA': 'GVMD_DATA'
-        }
-        
-        # Obtener fecha de cada feed usando el método del proyecto original
-        for feed_name, feed_type in feed_types.items():
-            escribir_log(f"Verificando feed {feed_name}...", 'INFO')
-            fecha_actualizacion = obtener_fecha_feed(feed_type)
-            
-            # Calcular días desde última actualización
-            if fecha_actualizacion:
-                escribir_log(f"Feed {feed_name}: Fecha obtenida: {fecha_actualizacion.strftime('%Y-%m-%d %H:%M:%S')}", 'INFO')
-                # Normalizar timezone si es necesario
-                if fecha_actualizacion.tzinfo is not None:
-                    fecha_actualizacion = fecha_actualizacion.replace(tzinfo=None)
-                
-                dias_desde_actualizacion = (fecha_actual - fecha_actualizacion).days
-                
-                escribir_log(f"Feed {feed_name}: {dias_desde_actualizacion} días desde última actualización (máximo: {feed_stale_days} días)", 'INFO')
-                
-                feeds_info[feed_name] = {
-                    'fecha': fecha_actualizacion.strftime('%Y-%m-%d %H:%M:%S'),
-                    'dias': dias_desde_actualizacion,
-                    'actualizado': dias_desde_actualizacion < feed_stale_days,
-                    'fuente': 'PostgreSQL (tabla info)'
-                }
-                
-                if dias_desde_actualizacion >= feed_stale_days:
-                    escribir_log(f"Feed {feed_name}: ⚠ DESACTUALIZADO ({dias_desde_actualizacion} días > {feed_stale_days} días)", 'WARNING')
-                    feeds_stale.append({
-                        'nombre': feed_name,
-                        'dias': dias_desde_actualizacion,
-                        'fecha': fecha_actualizacion.strftime('%Y-%m-%d %H:%M:%S')
-                    })
-            else:
-                # No se pudo obtener fecha
-                feeds_info[feed_name] = {
-                    'fecha': 'No disponible',
-                    'dias': None,
-                    'actualizado': None,
-                    'fuente': 'No encontrado'
-                }
-                escribir_log(f"Feed {feed_name}: No se pudo obtener fecha de actualización", 'WARNING')
-        
-        # Determinar estado general
-        if feeds_stale:
-            mensaje = f"{len(feeds_stale)} feed(s) desactualizado(s) (>{feed_stale_days} días)"
-            return {
-                'status': 'warning',
-                'message': mensaje,
-                'details': {
-                    'feeds_stale': feeds_stale,
-                    'all_feeds': feeds_info,
-                    'stale_days': feed_stale_days
-                }
-            }
-        elif any(feed.get('actualizado') is None for feed in feeds_info.values()):
-            # Algunos feeds no se pudieron verificar
-            return {
-                'status': 'warning',
-                'message': 'No se pudo verificar todos los feeds',
-                'details': {
-                    'feeds_stale': [],
-                    'all_feeds': feeds_info,
-                    'stale_days': feed_stale_days
-                }
-            }
-        else:
-            # Todos los feeds están actualizados
-            return {
-                'status': 'ok',
-                'message': f'Todos los feeds actualizados (<{feed_stale_days} días)',
-                'details': {
-                    'feeds_stale': [],
-                    'all_feeds': feeds_info,
-                    'stale_days': feed_stale_days
-                }
-            }
-                
-    except subprocess.TimeoutExpired:
-        escribir_log("Timeout al consultar base de datos PostgreSQL, usando método alternativo", 'WARNING')
-        return verificar_feeds_directorios(config, feed_stale_days)
-    except Exception as e:
-        escribir_log(f"Error al consultar PostgreSQL: {e}, usando método alternativo", 'WARNING')
-        return verificar_feeds_directorios(config, feed_stale_days)
+    Verifica la edad de los feeds OpenVAS.
 
-def verificar_feeds_directorios(config, feed_stale_days=30):
+    Fuente primaria: GMP get_feeds() (como la UI).
+    Fallback: psql dentro del contenedor Docker.
+    Telegram/alerta warning solo si hay edad CONFIRMADA >= feed_stale_days.
+    Feeds sin fecha legible → log WARNING, status ok (no falso positivo).
     """
-    Método alternativo: Verifica feeds usando fecha de modificación de directorios.
-    Se usa cuando no se puede consultar PostgreSQL.
-    """
-    try:
-        fecha_actual = datetime.datetime.now()
-        feeds_info = {}
-        feeds_stale = []
-        
-        # Rutas de directorios de feeds dentro del contenedor Docker
-        feed_dirs = {
-            'NVT': '/var/lib/openvas/plugins',
-            'SCAP': '/var/lib/gvm/scap-data',
-            'CERT': '/var/lib/gvm/cert-data',
-            'GVMD_DATA': '/var/lib/gvm/data-objects'
-        }
-        
-        # Verificar cada feed usando fecha de modificación del directorio
-        for feed_name, feed_dir in feed_dirs.items():
-            try:
-                result = subprocess.run(
-                    ['docker', 'exec', CONTAINER_NAME, 'stat', '-c', '%Y', feed_dir],
-                    capture_output=True,
-                    text=True,
-                    timeout=10
-                )
-                
-                if result.returncode == 0 and result.stdout.strip():
-                    try:
-                        timestamp = int(result.stdout.strip())
-                        fecha_actualizacion = datetime.datetime.fromtimestamp(timestamp)
-                        dias_desde_actualizacion = (fecha_actual - fecha_actualizacion).days
-                        
-                        feeds_info[feed_name] = {
-                            'fecha': fecha_actualizacion.strftime('%Y-%m-%d %H:%M:%S'),
-                            'dias': dias_desde_actualizacion,
-                            'actualizado': dias_desde_actualizacion < feed_stale_days,
-                            'fuente': 'directorio'
-                        }
-                        
-                        if dias_desde_actualizacion >= feed_stale_days:
-                            feeds_stale.append({
-                                'nombre': feed_name,
-                                'dias': dias_desde_actualizacion,
-                                'fecha': fecha_actualizacion.strftime('%Y-%m-%d %H:%M:%S')
-                            })
-                    except ValueError:
-                        feeds_info[feed_name] = {
-                            'fecha': 'Error al parsear',
-                            'dias': None,
-                            'actualizado': None,
-                            'fuente': 'directorio'
-                        }
-                else:
-                    feeds_info[feed_name] = {
-                        'fecha': 'No disponible',
-                        'dias': None,
-                        'actualizado': None,
-                        'fuente': 'directorio'
-                    }
-            except Exception as e:
-                feeds_info[feed_name] = {
-                    'fecha': f'Error: {str(e)[:50]}',
-                    'dias': None,
-                    'actualizado': None,
-                    'fuente': 'directorio'
-                }
-        
-        # Determinar estado general
-        if feeds_stale:
-            mensaje = f"{len(feeds_stale)} feed(s) desactualizado(s) (>{feed_stale_days} días)"
-            return {
-                'status': 'warning',
-                'message': mensaje,
-                'details': {
-                    'feeds_stale': feeds_stale,
-                    'all_feeds': feeds_info,
-                    'stale_days': feed_stale_days
-                }
-            }
-        elif any(feed.get('actualizado') is None for feed in feeds_info.values()):
-            return {
-                'status': 'warning',
-                'message': 'No se pudo verificar todos los feeds',
-                'details': {
-                    'feeds_stale': [],
-                    'all_feeds': feeds_info,
-                    'stale_days': feed_stale_days
-                }
-            }
+    fecha_actual = datetime.datetime.now()
+    feeds_info = {}
+    feeds_stale = []
+    feeds_unverified = []
+
+    gmp_feeds = obtener_feeds_via_gmp(config)
+
+    for feed_name in FEED_TYPES:
+        escribir_log(f"Verificando feed {feed_name}...", 'INFO')
+        fecha_actualizacion = None
+        fuente = None
+        version = None
+
+        if feed_name in gmp_feeds:
+            fecha_actualizacion = gmp_feeds[feed_name]['fecha']
+            fuente = gmp_feeds[feed_name]['fuente']
+            version = gmp_feeds[feed_name].get('version')
         else:
-            return {
-                'status': 'ok',
-                'message': f'Todos los feeds actualizados (<{feed_stale_days} días)',
-                'details': {
-                    'feeds_stale': [],
-                    'all_feeds': feeds_info,
-                    'stale_days': feed_stale_days
-                }
+            fecha_actualizacion = obtener_fecha_feed_psql_docker(feed_name)
+            if fecha_actualizacion is not None:
+                fuente = 'PostgreSQL (docker)'
+
+        if fecha_actualizacion is not None:
+            if fecha_actualizacion.tzinfo is not None:
+                fecha_actualizacion = fecha_actualizacion.replace(tzinfo=None)
+
+            dias = (fecha_actual - fecha_actualizacion).days
+            escribir_log(
+                f"Feed {feed_name}: {dias} días desde última actualización "
+                f"(máximo: {feed_stale_days} días, fuente={fuente})",
+                'INFO'
+            )
+
+            feeds_info[feed_name] = {
+                'fecha': fecha_actualizacion.strftime('%Y-%m-%d'),
+                'dias': dias,
+                'actualizado': dias < feed_stale_days,
+                'fuente': fuente,
+                'version': version
             }
-    except Exception as e:
-        escribir_log(f"Error en verificar_feeds_directorios: {e}", 'ERROR')
-        return {'status': 'error', 'message': f'Error al verificar feeds: {str(e)}', 'details': {}}
+
+            if dias >= feed_stale_days:
+                escribir_log(
+                    f"Feed {feed_name}: DESACTUALIZADO ({dias} días >= {feed_stale_days})",
+                    'WARNING'
+                )
+                feeds_stale.append({
+                    'nombre': feed_name,
+                    'dias': dias,
+                    'fecha': fecha_actualizacion.strftime('%Y-%m-%d')
+                })
+        else:
+            feeds_info[feed_name] = {
+                'fecha': 'No disponible',
+                'dias': None,
+                'actualizado': None,
+                'fuente': 'No encontrado'
+            }
+            feeds_unverified.append(feed_name)
+            escribir_log(
+                f"Feed {feed_name}: No se pudo obtener fecha (GMP/psql); "
+                f"no se alerta por Telegram",
+                'WARNING'
+            )
+
+    details = {
+        'feeds_stale': feeds_stale,
+        'feeds_unverified': feeds_unverified,
+        'all_feeds': feeds_info,
+        'stale_days': feed_stale_days
+    }
+
+    if feeds_stale:
+        return {
+            'status': 'warning',
+            'message': f"{len(feeds_stale)} feed(s) desactualizado(s) (>={feed_stale_days} días)",
+            'details': details
+        }
+
+    if feeds_unverified:
+        # Sin edad confirmada: no warning (evita falso positivo Telegram)
+        return {
+            'status': 'ok',
+            'message': (
+                f"Feeds sin alerta: {len(feeds_unverified)} sin fecha verificable "
+                f"(revisar logs); resto OK"
+            ),
+            'details': details
+        }
+
+    return {
+        'status': 'ok',
+        'message': f'Todos los feeds actualizados (<{feed_stale_days} días)',
+        'details': details
+    }
+
 
 def formatear_mensaje_alerta_completo(resultados, config, timestamp):
     """Formatea un mensaje completo con todas las alertas agrupadas"""
@@ -1070,6 +937,7 @@ def formatear_mensaje_alerta_completo(resultados, config, timestamp):
     if 'feeds_details' in resultados and resultados.get('feeds_details'):
         feeds_details = resultados['feeds_details']
         feeds_stale = feeds_details.get('feeds_stale', [])
+        feeds_unverified = feeds_details.get('feeds_unverified', [])
         
         if feeds_stale:
             mensaje += "\n" + "="*40 + "\n"
@@ -1088,10 +956,27 @@ def formatear_mensaje_alerta_completo(resultados, config, timestamp):
                         mensaje += f"{estado_emoji} <b>{feed_name}:</b> {feed_info.get('dias', 'N/A')} días"
                         if feed_info.get('fecha') and feed_info.get('fecha') != 'No disponible':
                             mensaje += f" (Última: {feed_info['fecha']})"
+                        fuente = feed_info.get('fuente')
+                        if fuente:
+                            mensaje += f" [{fuente}]"
                         mensaje += "\n"
                     else:
-                        mensaje += f"❓ <b>{feed_name}:</b> {feed_info.get('fecha', 'Desconocido')}\n"
+                        mensaje += (
+                            f"❓ <b>{feed_name}:</b> no se pudo verificar "
+                            f"({feed_info.get('fecha', 'Desconocido')})\n"
+                        )
                 mensaje += "\n"
+
+        elif feeds_unverified:
+            # Solo aparece si hay otras alertas en el mismo mensaje compuesto
+            mensaje += "\n" + "="*40 + "\n"
+            mensaje += "<b>📦 FEEDS (sin fecha verificable):</b>\n\n"
+            mensaje += (
+                "No es desactualización confirmada; falló la lectura GMP/psql.\n"
+            )
+            for name in feeds_unverified:
+                mensaje += f"• <b>{name}</b>\n"
+            mensaje += "\n"
     
     # Añadir detalle de espacio en disco si hay problemas
     if 'disk_details' in resultados and resultados.get('disk_details'):
@@ -1314,10 +1199,11 @@ def enviar_alertas(resultados, config):
         if checks.get('gvmd') != 'ok' or checks.get('gvm_connection') != 'ok':
             tiene_problemas = True
     
-    # Verificar feeds
+    # Verificar feeds: solo alerta si hay desactualización CONFIRMADA (warning/error)
     if monitoring_config.get('alert_on_feeds_stale', True):
         if checks.get('feeds') == 'warning' or checks.get('feeds') == 'error':
             tiene_problemas = True
+        # feeds ok con feeds_unverified no dispara Telegram (política anti-falso-positivo)
 
     # Verificar espacio en disco
     if monitoring_config.get('alert_on_disk_low', True) and checks.get('disk') != 'ok':

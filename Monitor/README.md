@@ -150,7 +150,7 @@ Edita `/opt/gvm/Config/config.json` y añade la sección `monitoring`:
 - `alert_on_docker_down`: Enviar alerta si Docker daemon está detenido (true/false)
 - `alert_on_gvm_down`: Enviar alerta si GVM no responde (true/false)
 - `alert_on_image_update`: Enviar alerta si hay actualización de imagen disponible (true/false)
-- `alert_on_feeds_stale`: Enviar alerta si los feeds están desactualizados (true/false)
+- `alert_on_feeds_stale`: Enviar alerta si los feeds están desactualizados con edad **confirmada** (true/false). No alerta si solo falla la lectura de la fecha.
 - `feed_stale_days`: Número de días sin actualizar para considerar un feed como desactualizado (default: 30)
 - `alert_on_disk_low`: Enviar alerta si el espacio libre es ≤ umbral (true/false, default: true)
 - `disk_min_free_gb`: GB libres mínimos antes de alertar (default: 5)
@@ -261,7 +261,7 @@ El servicio envía alertas formateadas con emojis para identificar el tipo:
 - 🛡️ **GVM (gvmd):** El puerto 9390 no responde
 - 🌐 **GSAD:** El puerto 9392 (web UI) no responde
 - 🔌 **Conexión GVM:** No se puede conectar a GVM vía TLS
-- 📦 **Feeds:** Los feeds de vulnerabilidades están desactualizados (>30 días)
+- 📦 **Feeds:** Algún feed tiene edad **confirmada** ≥ `feed_stale_days` (default 30). Fallos de lectura GMP/psql no generan esta alerta.
 - 💾 **Disco:** Quedan ≤5 GB libres en alguna partición vigilada (configurable)
 - 🔄 **Imagen:** Hay una actualización disponible para la imagen Docker
 - 📤 **SharePoint:** Falló la subida de los **reportes principales** (CSV/XLSX) a SharePoint. **`exclusion.csv` no genera alerta** (muchas instalaciones no tienen exclusiones): `subida_share.py` sale con éxito si falta o está vacío, y `get-reports-test.py` no envía Telegram para esa fase.
@@ -359,11 +359,12 @@ El servicio verifica los siguientes aspectos:
    - Obtiene la versión de GVM
 
 6. **Feeds de Vulnerabilidades:**
-   - Verifica la fecha de última actualización de los feeds (NVTs, SCAP, CERT, GVMD_DATA)
-   - Usa el protocolo GMP para obtener información de feeds
-   - Calcula días desde última actualización
-   - Alerta si algún feed tiene más de 30 días sin actualizar (configurable con `feed_stale_days`)
-   - Ejecuta `/opt/gvm/Cron/actualiza_gvm.sh` automáticamente si algún feed lleva `>= 15` días sin actualizar
+   - Fuente primaria: GMP `get_feeds()` (misma información que Administration → Feed Status en la UI)
+   - Fallback: `docker exec` + `psql` sobre la tabla `info` del contenedor (sin postgres en el host)
+   - Calcula días desde la versión del feed (`YYYYMMDDTHHMM`)
+   - **Alerta Telegram solo** si hay edad **confirmada** ≥ `feed_stale_days` (default: 30)
+   - Si no se puede leer la fecha: WARNING en log, **sin** Telegram (evita falsos positivos)
+   - Ejecuta `/opt/gvm/Cron/actualiza_gvm.sh` automáticamente si algún feed con edad conocida lleva `>= 15` días sin actualizar
    - Evita ejecuciones repetidas con un cooldown separado de `24h`
 
 7. **Espacio en Disco:**
